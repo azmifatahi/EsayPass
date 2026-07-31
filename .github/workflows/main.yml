@@ -24,7 +24,7 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Install Cordova & Increment Version
+    - name: Install Cordova, Setup Icon & Increment Version
       run: |
         npm install -g cordova
         cordova create cordova_app com.esaypass.app EsayPass
@@ -39,23 +39,19 @@ jobs:
           sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
         fi
         
-        # رفع رقم الإصدار تلقائياً (Version Code)
+        # رفع رقم الإصدار تلقائياً (android-versionCode)
         BUILD_NUM=${{ github.run_number }}
         sed -i "s/version=\"1.0.0\"/version=\"1.0.${BUILD_NUM}\" android-versionCode=\"${BUILD_NUM}\"/g" config.xml
 
         cordova platform add android
         cordova build android --debug
 
-    # توقيع الـ APK برمز ثابت تلقائي لضمان قبول التحديثات (Update)
-    - name: Sign APK Automatically
-      uses: rkbansal/sign-android-release@v1
-      with:
-        releaseDirectory: cordova_app/platforms/android/app/build/outputs/apk/debug
-        signingKeyBase64: ''
-        alias: ''
-        keyStorePassword: ''
-        keyPassword: ''
-      continue-on-error: true
+    # توقيع الـ APK باستخدام أدوات أندرويد الرسمية لضمان قبول التحديثات المستقلية
+    - name: Sign APK with Standard Android Tool
+      run: |
+        cd cordova_app/platforms/android/app/build/outputs/apk/debug
+        keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+        jarsigner -keystore debug.keystore -storepass android -keypass android app-debug.apk androiddebugkey
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
