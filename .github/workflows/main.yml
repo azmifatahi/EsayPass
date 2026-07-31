@@ -22,9 +22,9 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '22'
+        node-version: '20'
 
-    - name: Install Cordova and Build
+    - name: Install Cordova and Setup Icon
       run: |
         npm install -g cordova
         cordova create cordova_app com.esaypass.app EsayPass
@@ -33,11 +33,17 @@ jobs:
         cp -r ../* www/ 2>/dev/null || true
         rm -rf www/cordova_app
         rm -rf www/.github
+        
+        # ربط أيقونة التطبيق في ملف config.xml الخاص بـ Cordova
+        if [ -f "www/icon.png" ]; then
+          sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
+        fi
+        
         cordova platform add android
         cordova build android --debug
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: EsayPass-APK
+        name: EsayPass-APK-With-Icon
         path: cordova_app/platforms/android/app/build/outputs/apk/debug/app-debug.apk
