@@ -22,9 +22,9 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '22'
 
-    - name: Install Cordova, Setup Icon & Increment Version
+    - name: Install Cordova and Build
       run: |
         npm install -g cordova
         cordova create cordova_app com.esaypass.app EsayPass
@@ -39,35 +39,15 @@ jobs:
           sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
         fi
         
-        # رفع رقم Version Code ورقم الإصدار تلقائياً
+        # رفع رقم Version Code ليتعرف أندرويد على التحديثات مستقبلاً
         BUILD_NUM=${{ github.run_number }}
         sed -i "s/version=\"1.0.0\"/version=\"1.0.${BUILD_NUM}\" android-versionCode=\"${BUILD_NUM}\"/g" config.xml
 
         cordova platform add android
-        cordova build android --release
-
-    - name: Setup Keystore File
-      env:
-        KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      run: |
-        if [ -n "$KEYSTORE_BASE64" ]; then
-          echo "$KEYSTORE_BASE64" | base64 -d > cordova_app/my-release-key.keystore
-        else
-          keytool -genkeypair -v -keystore cordova_app/my-release-key.keystore -alias release_alias -keyalg RSA -keysize 2048 -validity 10000 -storepass esaypass123 -keypass esaypass123 -dname "CN=EsayPass, OU=Dev, O=EsayPass, L=City, S=State, C=US"
-        fi
-
-    - name: Sign & Align APK
-      run: |
-        cd cordova_app/platforms/android/app/build/outputs/apk/release
-        
-        # توقيع التطبيق بالمفتاح الثابت
-        jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore ../../../../../my-release-key.keystore -storepass esaypass123 -keypass esaypass123 app-release-unsigned.apk release_alias
-        
-        # إجراء محاذاة الملف Zipalign ليكون جاهزاً للتثبيت المباشر
-        ${ANDROID_HOME}/build-tools/34.0.0/zipalign -v 4 app-release-unsigned.apk EsayPass-v${{ github.run_number }}.apk
+        cordova build android --debug
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
         name: EsayPass-v${{ github.run_number }}
-        path: cordova_app/platforms/android/app/build/outputs/apk/release/EsayPass-v${{ github.run_number }}.apk
+        path: cordova_app/platforms/android/app/build/outputs/apk/debug/app-debug.apk
