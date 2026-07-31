@@ -24,7 +24,7 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Install Cordova and Setup Icon
+    - name: Install Cordova, Setup Icon & Auto-increment Version
       run: |
         npm install -g cordova
         cordova create cordova_app com.esaypass.app EsayPass
@@ -34,16 +34,34 @@ jobs:
         rm -rf www/cordova_app
         rm -rf www/.github
         
-        # ربط أيقونة التطبيق في ملف config.xml الخاص بـ Cordova
+        # ربط أيقونة التطبيق إذا كانت موجودة
         if [ -f "www/icon.png" ]; then
           sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
         fi
         
+        # رفع رقم الإصدار تلقائياً بناءً على رقم التمريرة في GitHub (للسماح بعمل Update)
+        BUILD_NUM=${{ github.run_number }}
+        sed -i "s/version=\"1.0.0\"/version=\"1.0.${BUILD_NUM}\" android-versionCode=\"${BUILD_NUM}\"/g" config.xml
+
         cordova platform add android
         cordova build android --debug
+
+    # إنشاء مفتاح توقيع ثابت محلي وتوقيع الـ APK به
+    - name: Sign APK with Fixed Keystore
+      run: |
+        cd cordova_app/platforms/android/app/build/outputs/apk/debug
+        
+        # إنشاء مفتاح keystore ثابت للبناء
+        keytool -genkey -v -keystore release.keystore -alias esaypass_key -keyalg RSA -keysize 2048 -validity 10000 -storepass 123456 -keypass 123456 -dname "CN=EsayPass, OU=Dev, O=EsayPass, L=City, S=State, C=US"
+        
+        # توقيع ملف APK
+        jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 -keystore release.keystore -storepass 123456 app-debug.apk esaypass_key
+        
+        # إعادة تسمية الملف الترفيعي
+        mv app-debug.apk EsayPass-Update-v${{ github.run_number }}.apk
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: EsayPass-APK-With-Icon
-        path: cordova_app/platforms/android/app/build/outputs/apk/debug/app-debug.apk
+        name: EsayPass-Update-v${{ github.run_number }}
+        path: cordova_app/platforms/android/app/build/outputs/apk/debug/EsayPass-Update-v${{ github.run_number }}.apk
