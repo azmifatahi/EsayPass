@@ -39,18 +39,18 @@ jobs:
           sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
         fi
         
-        # رفع رقم الإصدار تلقائياً (android-versionCode)
+        # رفع رقم الإصدار أوتوماتيكياً لجميع التحديثات القادمة
         BUILD_NUM=${{ github.run_number }}
         sed -i "s/version=\"1.0.0\"/version=\"1.0.${BUILD_NUM}\" android-versionCode=\"${BUILD_NUM}\"/g" config.xml
 
         cordova platform add android
         cordova build android --debug
 
-    # توقيع الـ APK باستخدام أدوات أندرويد الرسمية لضمان قبول التحديثات المستقلية
-    - name: Sign APK with Standard Android Tool
+    # توقيع تلقائي بدون طلب مدخلات تفاعلية لتفادي التعليق (Pending)
+    - name: Sign APK Automatically
       run: |
         cd cordova_app/platforms/android/app/build/outputs/apk/debug
-        keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+        keytool -genkey -noprompt -alias androiddebugkey -dname "CN=Android Debug, OU=Dev, O=EsayPass, L=City, S=State, C=US" -keystore debug.keystore -storepass android -keypass android -validity 10000 -keyalg RSA -keysize 2048
         jarsigner -keystore debug.keystore -storepass android -keypass android app-debug.apk androiddebugkey
 
     - name: Upload APK Artifact
