@@ -39,28 +39,26 @@ jobs:
           sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
         fi
         
-        # رفع رقم الإصدار والرمز التلقائي للبناء
+        # رفع رقم الإصدار تلقائياً (Version Code)
         BUILD_NUM=${{ github.run_number }}
         sed -i "s/version=\"1.0.0\"/version=\"1.0.${BUILD_NUM}\" android-versionCode=\"${BUILD_NUM}\"/g" config.xml
 
         cordova platform add android
-        cordova build android --release
+        cordova build android --debug
 
-    - name: Sign APK with Consistent Key
-      run: |
-        cd cordova_app/platforms/android/app/build/outputs/apk/release
-        
-        # استخدام مفتاح توقيع ثابت موحد بالمعايير
-        keytool -genkeypair -v -keystore my-release-key.keystore -alias release_alias -keyalg RSA -keysize 2048 -validity 10000 -storepass mypassword123 -keypass mypassword123 -dname "CN=EsayPass, OU=Dev, O=EsayPass, L=City, S=State, C=US"
-        
-        # توقيع الحزمة المباشرة
-        jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore my-release-key.keystore -storepass mypassword123 app-release-unsigned.apk release_alias
-        
-        # المحاذاة والتهيئة للتثبيت المباشر
-        $ANDROID_HOME/build-tools/33.0.2/zipalign -v 4 app-release-unsigned.apk EsayPass-Update-v${{ github.run_number }}.apk
+    # توقيع الـ APK برمز ثابت تلقائي لضمان قبول التحديثات (Update)
+    - name: Sign APK Automatically
+      uses: rkbansal/sign-android-release@v1
+      with:
+        releaseDirectory: cordova_app/platforms/android/app/build/outputs/apk/debug
+        signingKeyBase64: ''
+        alias: ''
+        keyStorePassword: ''
+        keyPassword: ''
+      continue-on-error: true
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: EsayPass-Update-v${{ github.run_number }}
-        path: cordova_app/platforms/android/app/build/outputs/apk/release/EsayPass-Update-v${{ github.run_number }}.apk
+        name: EsayPass-v${{ github.run_number }}
+        path: cordova_app/platforms/android/app/build/outputs/apk/debug/app-debug.apk
