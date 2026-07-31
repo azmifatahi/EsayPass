@@ -24,7 +24,7 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Install Cordova, Setup Icon & Auto-increment Version
+    - name: Install Cordova, Setup Signing & Build
       run: |
         npm install -g cordova
         cordova create cordova_app com.esaypass.app EsayPass
@@ -34,32 +34,38 @@ jobs:
         rm -rf www/cordova_app
         rm -rf www/.github
         
-        # ربط أيقونة التطبيق
+        # 1. ربط أيقونة التطبيق
         if [ -f "www/icon.png" ]; then
           sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
         fi
         
-        # رفع رقم Version Code تلقائياً ليتعرف أندرويد على التحديثات
+        # 2. رفع رقم Version Code تلقائياً ليتعرف أندرويد على التحديث
         BUILD_NUM=${{ github.run_number }}
         sed -i "s/version=\"1.0.0\"/version=\"1.0.${BUILD_NUM}\" android-versionCode=\"${BUILD_NUM}\"/g" config.xml
 
-        cordova platform add android
-        cordova build android --debug
-
-    # توقيع APK بمفتاح ثابت موحد ومحمي لتجاوز رفض الأندرويد للتحديث
-    - name: Sign APK with Deterministic Key
-      run: |
-        cd cordova_app/platforms/android/app/build/outputs/apk/debug
-        
-        # إنتاج مفتاح محدد الثوابت بناءً على اسم الحزمة
-        keytool -genkeypair -alias esaypass_key -keyalg RSA -keysize 2048 -validity 10000 \
-          -keystore fixed.keystore -storepass 12345678 -keypass 12345678 \
+        # 3. إنشاء مفتاح توقيع ثابت موحد (Keystore)
+        keytool -genkeypair -alias esaypasskey -keyalg RSA -keysize 2048 -validity 10000 \
+          -keystore release.keystore -storepass 123456 -keypass 123456 \
           -dname "CN=EsayPass, OU=Dev, O=EsayPass, L=City, ST=State, C=US"
-        
-        # توقيع وتأكيد حزمة الـ APK
-        jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-          -keystore fixed.keystore -storepass 12345678 -keypass 12345678 \
-          app-debug.apk esaypass_key
+
+        # 4. إعداد ملف التوقيع الخاص بـ Cordova (build.json)
+        cat <<EOF > build.json
+        {
+          "android": {
+            "debug": {
+              "keystore": "release.keystore",
+              "storePassword": "123456",
+              "alias": "esaypasskey",
+              "password": "123456",
+              "keystoreType": ""
+            }
+          }
+        }
+        EOF
+
+        # 5. بناء التطبيق بالتوقيع الموحد
+        cordova platform add android
+        cordova build android --debug --buildConfig=build.json
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
