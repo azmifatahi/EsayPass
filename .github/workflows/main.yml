@@ -24,7 +24,7 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Install Cordova, Setup Icon & Build
+    - name: Install Cordova, Disable Splash & Build
       run: |
         npm install -g cordova
         cordova create cordova_app com.esaypass.app EsayPass
@@ -39,21 +39,29 @@ jobs:
           sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
         fi
         
-        # 2. تعطيل شاشة البداية الافتراضية (Splash Screen) ومنع ظهور الشعار السوداء
+        # 2. إخفاء وتعطيل شاشة البداية بكل الوسائل الممكنة لجميع إصدارات أندرويد
         sed -i '/<\/widget>/i \    <preference name="SplashScreen" value="none" />' config.xml
         sed -i '/<\/widget>/i \    <preference name="SplashScreenDelay" value="0" />' config.xml
         sed -i '/<\/widget>/i \    <preference name="AutoHideSplashScreen" value="true" />' config.xml
-        
-        # 3. رفع رقم Version Code لضمان التحديثات
+        sed -i '/<\/widget>/i \    <preference name="FadeSplashScreen" value="false" />' config.xml
+        sed -i '/<\/widget>/i \    <preference name="AndroidWindowSplashScreenAnimatedIcon" value="www/icon.png" />' config.xml
+        sed -i '/<\/widget>/i \    <preference name="AndroidWindowSplashScreenBackground" value="#121212" />' config.xml
+
+        # 3. رفع رقم Version Code لضمان قبول التحديثات
         BUILD_NUM=${{ github.run_number }}
         sed -i "s/version=\"1.0.0\"/version=\"1.0.${BUILD_NUM}\" android-versionCode=\"${BUILD_NUM}\"/g" config.xml
 
-        # 4. إنشاء مفتاح توقيع ثابت
+        # 4. إضافة منصة الأندرويد
+        cordova platform add android
+
+        # 5. إلغاء الشعار الافتراضي من ملفات الموارد (Resources) مباشرة إن وجد
+        find platforms/android/app/src/main/res/ -name "*ic_cdv_splashscreen*" -delete 2>/dev/null || true
+
+        # 6. إعداد التوقيع الموحد
         keytool -genkeypair -alias esaypasskey -keyalg RSA -keysize 2048 -validity 10000 \
           -keystore release.keystore -storepass 123456 -keypass 123456 \
           -dname "CN=EsayPass, OU=Dev, O=EsayPass, L=City, ST=State, C=US"
 
-        # 5. إعداد ملف التوقيع
         cat <<EOF > build.json
         {
           "android": {
@@ -68,7 +76,6 @@ jobs:
         }
         EOF
 
-        cordova platform add android
         cordova build android --debug --buildConfig=build.json
 
     - name: Upload APK Artifact
