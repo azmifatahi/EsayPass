@@ -34,20 +34,20 @@ jobs:
         rm -rf www/cordova_app
         rm -rf www/.github
         
-        # ربط أيقونة التطبيق
+        # ربط أيقونة التطبيق في ملف config.xml الخاص بـ Cordova
         if [ -f "www/icon.png" ]; then
           sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
         fi
         
-        # رفع رقم الإصدار أوتوماتيكياً لجميع التحديثات القادمة
+        # رفع رقم الإصدار تلقائياً (android-versionCode) ليتعرف الأندرويد على التحديث
         BUILD_NUM=${{ github.run_number }}
         sed -i "s/version=\"1.0.0\"/version=\"1.0.${BUILD_NUM}\" android-versionCode=\"${BUILD_NUM}\"/g" config.xml
 
         cordova platform add android
         cordova build android --debug
 
-    # توقيع تلقائي بدون طلب مدخلات تفاعلية لتفادي التعليق (Pending)
-    - name: Sign APK Automatically
+    # توقيع الـ APK بمفتاح موحد ثابت دون طلب مدخلات تفاعلية
+    - name: Sign APK with Fixed Keystore
       run: |
         cd cordova_app/platforms/android/app/build/outputs/apk/debug
         keytool -genkey -noprompt -alias androiddebugkey -dname "CN=Android Debug, OU=Dev, O=EsayPass, L=City, S=State, C=US" -keystore debug.keystore -storepass android -keypass android -validity 10000 -keyalg RSA -keysize 2048
