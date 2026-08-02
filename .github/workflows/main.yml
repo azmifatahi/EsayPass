@@ -24,7 +24,7 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Install Cordova, Disable Splash & Build
+    - name: Install Cordova, Set Permissions & Build
       run: |
         npm install -g cordova
         cordova create cordova_app com.esaypass.app EsayPass
@@ -39,7 +39,18 @@ jobs:
           sed -i '/<\/widget>/i \    <icon src="www/icon.png" />' config.xml
         fi
         
-        # 2. إخفاء وتعطيل شاشة البداية بكل الوسائل الممكنة لجميع إصدارات أندرويد
+        # 2. إضافة أذونات الصوت والميكروفون والإنترنت لتشغيل المكالمات (WebRTC)
+        sed -i '/<\/widget>/i \    <config-file target="AndroidManifest.xml" parent="/*" xmlns:android="http://schemas.android.com/apk/res/android">' config.xml
+        sed -i '/<\/widget>/i \        <uses-permission android:name="android.permission.RECORD_AUDIO" />' config.xml
+        sed -i '/<\/widget>/i \        <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' config.xml
+        sed -i '/<\/widget>/i \        <uses-permission android:name="android.permission.INTERNET" />' config.xml
+        sed -i '/<\/widget>/i \        <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' config.xml
+        sed -i '/<\/widget>/i \    </config-file>' config.xml
+
+        # 3. السماح بطلب الإذن بالصوت والميكروفون في WebView
+        sed -i '/<\/widget>/i \    <preference name="MediaPlaybackRequiresUserAction" value="false" />' config.xml
+
+        # 4. إخفاء وتعطيل شاشة البداية
         sed -i '/<\/widget>/i \    <preference name="SplashScreen" value="none" />' config.xml
         sed -i '/<\/widget>/i \    <preference name="SplashScreenDelay" value="0" />' config.xml
         sed -i '/<\/widget>/i \    <preference name="AutoHideSplashScreen" value="true" />' config.xml
@@ -47,17 +58,17 @@ jobs:
         sed -i '/<\/widget>/i \    <preference name="AndroidWindowSplashScreenAnimatedIcon" value="www/icon.png" />' config.xml
         sed -i '/<\/widget>/i \    <preference name="AndroidWindowSplashScreenBackground" value="#121212" />' config.xml
 
-        # 3. رفع رقم Version Code لضمان قبول التحديثات
+        # 5. رفع رقم Version Code لضمان قبول التحديثات
         BUILD_NUM=${{ github.run_number }}
         sed -i "s/version=\"1.0.0\"/version=\"1.0.${BUILD_NUM}\" android-versionCode=\"${BUILD_NUM}\"/g" config.xml
 
-        # 4. إضافة منصة الأندرويد
+        # 6. إضافة منصة الأندرويد
         cordova platform add android
 
-        # 5. إلغاء الشعار الافتراضي من ملفات الموارد (Resources) مباشرة إن وجد
+        # 7. إلغاء الشعار الافتراضي من ملفات الموارد (Resources)
         find platforms/android/app/src/main/res/ -name "*ic_cdv_splashscreen*" -delete 2>/dev/null || true
 
-        # 6. إعداد التوقيع الموحد
+        # 8. إعداد التوقيع الموحد
         keytool -genkeypair -alias esaypasskey -keyalg RSA -keysize 2048 -validity 10000 \
           -keystore release.keystore -storepass 123456 -keypass 123456 \
           -dname "CN=EsayPass, OU=Dev, O=EsayPass, L=City, ST=State, C=US"
