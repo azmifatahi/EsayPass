@@ -1,0 +1,3638 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: gap: https://ssl.gstatic.com;">
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>اسم تطبيقك</title>
+
+    <!-- 1. تمكين وضع التطبيق الشامل في Safari على iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+
+    <!-- 2. التحكم في لون الشريط العلوي (شريط البطارية والساعة) -->
+    <!-- الخيارات: default (أبيض) | black (أسود) | black-translucent (شفاف يتداخل مع خلفية التطبيق) -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- 3. الاسم الذي سيظهر أسفل الأيقونة في الشاشة الرئيسية -->
+    <meta name="apple-mobile-web-app-title" content="اسم التطبيق">
+
+    <!-- 4. صورة الأيقونة التي ستظهر على شاشة الآيفون (يفضل مقاس 180x180 أو أكبر) -->
+    <link rel="apple-touch-icon" href="app-icon.png">
+
+  <title>النظام الموحد - الإصدار المطور والمصحح</title>
+
+  <!-- Google Fonts: Cairo -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Almarai:wght@400;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome 6.4 (Icons) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- SheetJS للمعالجة السريعة لملفات Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- html2canvas لتحميل العناصر كصور (خاص بالمشرف) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <!-- ==========================================================================
+       قائمة المستخدمين "الأساس" الموحّدة بين موقع epass وموقع ccare (مدمجة هنا).
+       هذا هو المصدر الوحيد لإنشاء الحسابات الجديدة بالكود.
+
+       - لإنشاء مستخدم جديد: أضف سطراً جديداً داخل window.USERS_SEED هنا وفي
+         نفس الكتلة الموجودة داخل ccare.html (ابحث عن "USERS_SEED" هناك)
+         حتى تبقى القائمتان متطابقتين تماماً بين الموقعين.
+       - عند فتح أي من الموقعين، سيتم رفع أي مستخدم "غير موجود بعد" في
+         Firebase تلقائياً (مرة واحدة فقط لكل مستخدم - العملية آمنة ولا
+         تكرر الحسابات ولا تكتب فوق كلمة مرور أو بيانات عُدّلت لاحقاً).
+       - كلا الموقعين يقرآن ويكتبان في نفس مجموعة Firestore "system_users"
+         باستخدام نفس معرّف المستند: اسم المستخدم بحروف صغيرة (lowercase).
+       ========================================================================== -->
+  <script>
+    window.USERS_SEED = {
+      "admin": { username: "admin", name: "المشرف العام",   role: "admin",      password: "123", badge: "ADM-01" },
+      "tech":  { username: "tech",  name: "المشرف التقني",   role: "tech_admin", password: "123", badge: "TEC-01" },
+      "bs":    { username: "bs",    name: "مشرف الأعمال",    role: "bs",         password: "123", badge: "BS-01"  },
+      "emp1":  { username: "emp1",  name: "أحمد محمد",       role: "employee",   password: "123", badge: "EMP-101", uid: "9081", phone: "+249912345678" }
+
+      /* لإضافة مستخدم جديد انسخ السطر التالي وعدّل عليه (وكرره أيضاً داخل ccare.html):
+      ,"username_here": { username: "username_here", name: "الاسم بالعربي", role: "employee", password: "123", badge: "EMP-XXX" }
+      */
+    };
+
+    /**
+     * يرفع كل مستخدم في USERS_SEED إلى Firestore (system_users) فقط إذا لم يكن
+     * موجوداً مسبقاً. يُستدعى تلقائياً بعد تهيئة Firebase مباشرة. لن يُنشئ أي
+     * حساب موجود بالفعل مرة أخرى، ولن يكتب فوق كلمة مرور أو بيانات غيّرها
+     * المستخدم لاحقاً من أي من الموقعين.
+     */
+    window.seedUsersToFirebase = async function () {
+      if (!window.db || !window.doc || !window.getDoc || !window.setDoc) {
+        console.warn("⚠️ seedUsersToFirebase: Firebase غير مهيأ بعد.");
+        return;
+      }
+      for (const [key, user] of Object.entries(window.USERS_SEED)) {
+        const uname = key.toLowerCase();
+        try {
+          const ref = window.doc(window.db, "system_users", uname);
+          const snap = await window.getDoc(ref);
+          if (!snap.exists()) {
+            await window.setDoc(ref, {
+              username: uname,
+              name: user.name || uname,
+              role: user.role || "user",
+              password: user.password || "123",
+              badge: user.badge || "",
+              phone: user.phone || "",
+              region: user.region || "",
+              avatar: user.avatar || "",
+              uid: user.uid || "",
+              status: user.status || "active",
+              lastUpdated: new Date().toISOString()
+            });
+            console.log(`✅ تم إنشاء المستخدم "${uname}" في Firebase (لأول مرة).`);
+          }
+        } catch (e) {
+          console.error(`⚠️ خطأ أثناء تجهيز المستخدم "${uname}":`, e);
+        }
+      }
+    };
+  </script>
+
+  <!-- Firebase SDK v9 -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, addDoc, getDocs, onSnapshot, query, orderBy, where, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCuuxf-Jc8niO3cqHyZ21FBi-nsNMAyLr8",
+      authDomain: "c-ccare.firebaseapp.com",
+      projectId: "c-ccare",
+      storageBucket: "c-ccare.firebasestorage.app",
+      messagingSenderId: "518969406368",
+      appId: "1:518969406368:web:0dd7badd1af97ab277aac5",
+      measurementId: "G-X6JR9LS4DB"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    window.db = db;
+    window.doc = doc;
+    window.setDoc = setDoc;
+    window.getDoc = getDoc;
+    window.getDocs = getDocs;
+    window.collection = collection;
+    window.addDoc = addDoc;
+    window.onSnapshot = onSnapshot;
+    window.query = query;
+    window.orderBy = orderBy;
+    window.where = where;
+    window.updateDoc = updateDoc;
+    window.deleteDoc = deleteDoc;
+
+    if (window.seedUsersToFirebase) {
+      window.seedUsersToFirebase();
+    }
+  </script>
+
+  <style>
+
+    :root {
+      /* ===== Surface tokens ===== */
+      --bg-dark: #08090f;
+      --bg-dark-2: #050509;
+      --card-bg: rgba(15, 17, 28, 0.72);
+      --card-bg-solid: #12141f;
+      --card-border: rgba(140, 130, 255, 0.16);
+      --card-border-strong: rgba(140, 130, 255, 0.32);
+      --divider: rgba(255, 255, 255, 0.07);
+
+      /* ===== Brand / semantic colors ===== */
+      --layer-primary: #6d5ef8;
+      --layer-primary-2: #8f7dff;
+      --layer-secondary: #17c3cc;
+      --layer-secondary-2: #4fe0e8;
+      --layer-accent: #fb5a7e;
+      --layer-accent-2: #ff7d9a;
+      --layer-warning: #f5a524;
+      --layer-warning-2: #ffc25c;
+      --layer-success: #22c98f;
+      --layer-success-2: #4fe3ac;
+      --layer-darkblue: #4c8dff;
+
+      --text-main: #f6f7fc;
+      --text-sub: #939aba;
+      --text-faint: #5c6284;
+      --input-bg: #10121c;
+
+      /* ===== Shape ===== */
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 20px;
+      --radius-full: 999px;
+
+      /* ===== Elevation ===== */
+      --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.28);
+      --shadow-md: 0 12px 34px rgba(0, 0, 0, 0.38);
+      --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+      --glow-primary: 0 8px 22px rgba(109, 94, 248, 0.35);
+      --glow-secondary: 0 8px 22px rgba(23, 195, 204, 0.32);
+      --glow-accent: 0 8px 22px rgba(251, 90, 126, 0.32);
+      --glow-warning: 0 8px 22px rgba(245, 165, 36, 0.32);
+      --glow-success: 0 8px 22px rgba(34, 201, 143, 0.32);
+
+      --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-fast: all 0.15s ease;
+      --font-display: 'Almarai', 'Cairo', sans-serif;
+      --font-body: 'Cairo', sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-body);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image:
+        radial-gradient(at 8% 8%, rgba(109, 94, 248, 0.16) 0, transparent 42%),
+        radial-gradient(at 92% 12%, rgba(23, 195, 204, 0.13) 0, transparent 42%),
+        radial-gradient(at 50% 100%, rgba(251, 90, 126, 0.09) 0, transparent 55%),
+        linear-gradient(180deg, var(--bg-dark) 0%, var(--bg-dark-2) 100%);
+      background-attachment: fixed;
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px;
+      overflow-x: hidden;
+      line-height: 1.5;
+    }
+
+    /* ===== Scrollbars ===== */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(140, 130, 255, 0.3); border-radius: var(--radius-full); }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(140, 130, 255, 0.5); }
+
+    /* ===== Focus accessibility ===== */
+    a:focus-visible, button:focus-visible, input:focus-visible,
+    select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--layer-secondary-2);
+      outline-offset: 2px;
+      border-radius: var(--radius-sm);
+    }
+
+    .container { width: 100%; max-width: 1200px; margin: 0 auto; }
+
+    .glass-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(28px) saturate(140%);
+      -webkit-backdrop-filter: blur(28px) saturate(140%);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-xl);
+      padding: 18px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      animation: fadeIn 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .view-panel { animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+
+    .hidden { display: none !important; }
+
+    .brand-header { text-align: center; margin-bottom: 18px; }
+    .brand-icon {
+      width: 54px; height: 54px;
+      position: relative;
+      background: linear-gradient(135deg, var(--layer-primary), var(--layer-secondary));
+      border-radius: 16px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 22px; color: white; margin-bottom: 10px;
+      box-shadow: var(--glow-primary);
+    }
+    .brand-icon::before {
+      content: '';
+      position: absolute;
+      inset: -6px;
+      border-radius: 20px;
+      background: conic-gradient(from 0deg, var(--layer-primary), var(--layer-secondary), var(--layer-accent), var(--layer-primary));
+      opacity: 0.35;
+      z-index: -1;
+      filter: blur(10px);
+      animation: spin 6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .brand-title {
+      font-family: var(--font-display);
+      font-size: 1.35rem; font-weight: 800; letter-spacing: 0.01em;
+      background: linear-gradient(to right, #ffffff, #b8b2ff);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .input-group { margin-bottom: 13px; }
+    .input-group label {
+      display: block; margin-bottom: 5px; font-weight: 700; font-size: 0.78rem;
+      color: var(--text-sub); letter-spacing: 0.01em;
+    }
+    .input-wrapper { position: relative; display: flex; align-items: center; }
+    .input-wrapper i.field-icon { position: absolute; right: 13px; color: var(--layer-secondary-2); font-size: 0.9rem; }
+
+    .toggle-password {
+      position: absolute; left: 12px; color: var(--text-sub);
+      cursor: pointer; font-size: 0.9rem; padding: 4px; transition: var(--transition-fast);
+    }
+    .toggle-password:hover { color: white; }
+
+    .form-input {
+      width: 100%; padding: 11px 38px;
+      background: var(--input-bg);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: var(--radius-md); color: white; font-size: 0.85rem;
+      transition: var(--transition);
+    }
+    .form-input::placeholder { color: var(--text-faint); }
+    .form-input:hover { border-color: rgba(255, 255, 255, 0.16); }
+    .form-input:focus { outline: none; border-color: var(--layer-primary); box-shadow: 0 0 0 3px rgba(109, 94, 248, 0.22); }
+    select.form-input option { background: #12141f; color: white; }
+    select.form-input { cursor: pointer; }
+    textarea.form-input { resize: vertical; min-height: 84px; }
+
+    .btn {
+      width: 100%; padding: 11px 16px; border: none; border-radius: var(--radius-md);
+      font-size: 0.85rem; font-weight: 700; cursor: pointer; transition: var(--transition);
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px; position: relative;
+      white-space: nowrap; letter-spacing: 0.01em;
+    }
+    .btn:active { transform: translateY(0) scale(0.98); }
+
+    .btn-primary { background: linear-gradient(135deg, var(--layer-primary), var(--layer-primary-2)); color: white; box-shadow: var(--glow-primary); }
+    .btn-primary:hover { filter: brightness(1.1); transform: translateY(-2px); box-shadow: 0 12px 28px rgba(109, 94, 248, 0.42); }
+
+    .btn-secondary { background: linear-gradient(135deg, var(--layer-secondary), #0da3ab); color: white; box-shadow: var(--glow-secondary); }
+    .btn-secondary:hover { filter: brightness(1.1); transform: translateY(-2px); box-shadow: 0 12px 28px rgba(23, 195, 204, 0.4); }
+
+    .btn-accent { background: linear-gradient(135deg, var(--layer-accent), #e14468); color: white; box-shadow: var(--glow-accent); }
+    .btn-accent:hover { filter: brightness(1.1); transform: translateY(-2px); box-shadow: 0 12px 28px rgba(251, 90, 126, 0.4); }
+
+    .btn-warning { background: linear-gradient(135deg, var(--layer-warning), #d9890f); color: white; box-shadow: var(--glow-warning); }
+    .btn-warning:hover { filter: brightness(1.1); transform: translateY(-2px); box-shadow: 0 12px 28px rgba(245, 165, 36, 0.4); }
+
+    .btn-success { background: linear-gradient(135deg, var(--layer-success), #189a70); color: white; box-shadow: var(--glow-success); }
+    .btn-success:hover { filter: brightness(1.1); transform: translateY(-2px); box-shadow: 0 12px 28px rgba(34, 201, 143, 0.4); }
+
+    .btn-excel { background: linear-gradient(135deg, #12894a, #17493a); color: white; width: auto; padding: 7px 13px; font-size: 0.78rem; box-shadow: 0 6px 16px rgba(18, 137, 74, 0.3); }
+    .btn-excel:hover { transform: translateY(-2px); filter: brightness(1.1); }
+
+    .btn-logout {
+      width: auto; padding: 7px 13px; font-size: 0.78rem;
+      background: rgba(251, 90, 126, 0.12); color: #ffb2c2;
+      border: 1px solid rgba(251, 90, 126, 0.28);
+    }
+    .btn-logout:hover { background: rgba(251, 90, 126, 0.24); color: white; }
+
+    .link-btn {
+      background: none; border: none; color: var(--layer-secondary-2); font-size: 0.8rem;
+      cursor: pointer; font-weight: 700; text-decoration: none; display: inline-block; margin-top: 9px;
+      transition: var(--transition-fast);
+    }
+    .link-btn:hover { text-decoration: underline; filter: brightness(1.15); }
+
+    .card-header-flex { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .card-header-flex h3 { font-family: var(--font-display); letter-spacing: 0.01em; }
+
+    .view-panel .btn, #dashboard-header .btn, .modal-body .btn, .modal-header .btn, .chat-footer .btn,
+    #header-action-buttons .btn {
+      position: relative; overflow: visible;
+    }
+    .view-panel .btn::after, #dashboard-header .btn::after, .modal-body .btn::after,
+    .modal-header .btn::after, .chat-footer .btn::after, #header-action-buttons .btn::after {
+      content: '';
+      position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+      background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+      transform: skewX(-20deg);
+      transition: left 0.6s ease;
+      pointer-events: none;
+    }
+    .view-panel .btn:hover::after, #dashboard-header .btn:hover::after, .modal-body .btn:hover::after,
+    .modal-header .btn:hover::after, .chat-footer .btn:hover::after, #header-action-buttons .btn:hover::after {
+      left: 120%;
+    }
+
+    .view-panel { display: flex; flex-direction: column; }
+    .view-panel .glass-card {
+      position: relative;
+      transition: var(--transition);
+    }
+    .view-panel .glass-card::after {
+      content: '';
+      position: absolute; left: 0; right: 0; top: 0; height: 2px;
+      border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+      background: linear-gradient(90deg, transparent, var(--layer-primary), var(--layer-secondary), transparent);
+      background-size: 200% 100%;
+      animation: scanline 5s linear infinite;
+      opacity: 0.55;
+    }
+    .view-panel .glass-card:hover {
+      border-color: var(--card-border-strong);
+      box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      transform: translateY(-2px);
+    }
+    .view-panel .glass-card:nth-of-type(1) { animation-delay: 0.03s; }
+    .view-panel .glass-card:nth-of-type(2) { animation-delay: 0.1s; }
+    .view-panel .glass-card:nth-of-type(3) { animation-delay: 0.17s; }
+    .view-panel .glass-card:nth-of-type(4) { animation-delay: 0.24s; }
+
+    .upload-box {
+      border: 2px dashed rgba(109, 94, 248, 0.35);
+      background: rgba(15, 17, 28, 0.5); border-radius: var(--radius-md);
+      padding: 18px 12px; text-align: center; margin-bottom: 12px;
+      cursor: pointer; transition: var(--transition);
+    }
+    .upload-box:hover { border-color: var(--layer-secondary); background: rgba(23, 195, 204, 0.06); transform: translateY(-1px); }
+
+    .panel-nav { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    .user-profile-header { display: flex; align-items: center; gap: 10px; direction: rtl; }
+    .user-info-text { display: flex; flex-direction: column; text-align: right; }
+    .user-name { color: #ffffff; font-size: 0.9rem; font-weight: 800; }
+    .user-role { color: var(--layer-secondary-2); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.01em; }
+
+    .avatar-circle {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, var(--layer-primary), var(--layer-secondary));
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; color: white; overflow: hidden; font-size: 1rem; flex-shrink: 0;
+      box-shadow: var(--shadow-sm), 0 0 0 2px rgba(255, 255, 255, 0.06);
+      animation: avatarGlow 3s ease-in-out infinite;
+    }
+    @keyframes avatarGlow {
+      0%, 100% { box-shadow: var(--shadow-sm), 0 0 0 2px rgba(255, 255, 255, 0.06), 0 0 0 0 rgba(109, 94, 248, 0.4); }
+      50% { box-shadow: var(--shadow-sm), 0 0 0 2px rgba(255, 255, 255, 0.06), 0 0 14px 3px rgba(23, 195, 204, 0.35); }
+    }
+    .avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
+
+    .table-avatar-circle {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--layer-primary), var(--layer-secondary));
+      border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+      font-weight: 700; color: white; overflow: hidden; font-size: 0.75rem; flex-shrink: 0;
+    }
+    .table-avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
+
+    .user-cell-flex { display: flex; align-items: center; gap: 8px; text-align: right; }
+
+    .modal-overlay {
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      background-color: var(--bg-dark);
+      background-image:
+        radial-gradient(at 12% 8%, rgba(109, 94, 248, 0.16) 0, transparent 42%),
+        radial-gradient(at 88% 92%, rgba(23, 195, 204, 0.13) 0, transparent 45%);
+      display: flex; align-items: stretch;
+      justify-content: center; z-index: 2000; padding: 0;
+      animation: fadeIn 0.2s ease-out;
+    }
+    .modal-content {
+      background: transparent !important; width: 100% !important; max-width: 100% !important;
+      border-radius: 0 !important; color: #fff;
+      border: none !important;
+      direction: rtl; overflow: hidden; max-height: 100vh !important; height: 100%;
+      display: flex; flex-direction: column;
+      box-shadow: none !important; animation: pageIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: translateY(18px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes pageIn {
+      from { opacity: 0; transform: scale(0.97) translateY(10px); filter: blur(4px); }
+      to { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+    }
+    .modal-header {
+      background: linear-gradient(135deg, #14162380, var(--card-bg-solid) 70%);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      padding: 16px 18px; display: flex;
+      justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+      border-bottom: 1px solid var(--divider);
+      position: sticky; top: 0; z-index: 5;
+      flex-shrink: 0;
+    }
+    .modal-header::after {
+      content: '';
+      position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--layer-primary), var(--layer-secondary), transparent);
+      background-size: 200% 100%;
+      animation: scanline 3.5s linear infinite;
+      opacity: 0.85;
+    }
+    @keyframes scanline {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .modal-header h3 { font-family: var(--font-display); letter-spacing: 0.01em; }
+    .close-btn {
+      background: rgba(255, 255, 255, 0.06); border: 1px solid var(--divider); color: var(--text-sub);
+      font-size: 18px; cursor: pointer; transition: var(--transition-fast); line-height: 1;
+      width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .close-btn:hover { color: white; background: var(--layer-accent); border-color: var(--layer-accent); transform: rotate(90deg); }
+    .modal-body {
+      padding: 18px; overflow-y: auto; flex: 1;
+      max-width: 1100px; width: 100%; margin: 0 auto;
+    }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .stat-card {
+      background: rgba(24, 27, 42, 0.6); border: 1px solid var(--divider);
+      border-radius: var(--radius-md); padding: 12px; display: flex; align-items: center; gap: 10px;
+      transition: var(--transition-fast);
+    }
+    .stat-card:hover { border-color: var(--card-border-strong); transform: translateY(-1px); }
+    .stat-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; }
+
+    .table-container {
+      position: relative;
+      overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--divider); -webkit-overflow-scrolling: touch;
+    }
+    .table-container::before {
+      content: '';
+      position: absolute; left: 0; right: 0; top: 0; height: 2px; z-index: 2;
+      background: linear-gradient(90deg, transparent, var(--layer-secondary), var(--layer-primary), transparent);
+      background-size: 200% 100%;
+      animation: scanline 4s linear infinite;
+      opacity: 0.75;
+    }
+    table { width: 100%; border-collapse: collapse; text-align: right; font-size: 0.8rem; min-width: 500px; }
+    th {
+      background: #171a2c; padding: 11px 12px; color: #c9c4ff; font-weight: 700; white-space: nowrap;
+      border-bottom: 1px solid var(--divider); position: sticky; top: 0; z-index: 1;
+      font-size: 0.76rem; letter-spacing: 0.02em; text-transform: uppercase;
+    }
+    td { padding: 11px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.045); background: rgba(15, 17, 28, 0.4); vertical-align: middle; transition: var(--transition-fast); }
+    tbody tr { animation: rowIn 0.4s ease both; }
+    @keyframes rowIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(109, 94, 248, 0.09); box-shadow: inset 3px 0 0 var(--layer-primary); }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: var(--radius-full);
+      font-size: 0.7rem; font-weight: 700; white-space: nowrap;
+    }
+    .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+    .badge-vpn { background: rgba(251, 90, 126, 0.14); color: #ffb2c2; border: 1px solid rgba(251, 90, 126, 0.3); }
+    .badge-tech { background: rgba(23, 195, 204, 0.14); color: #7de8ee; border: 1px solid rgba(23, 195, 204, 0.3); }
+    .badge-admin { background: rgba(245, 165, 36, 0.14); color: #ffd68a; border: 1px solid rgba(245, 165, 36, 0.3); }
+
+    .status-indicator {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 0.7rem; font-weight: 700;
+      padding: 4px 10px; border-radius: var(--radius-full); background: rgba(34, 201, 143, 0.14); color: var(--layer-success-2);
+      border: 1px solid rgba(34, 201, 143, 0.3); white-space: nowrap;
+    }
+    .pulse-dot { width: 6px; height: 6px; background-color: var(--layer-success-2); border-radius: 50%; display: inline-block; animation: blink 1.5s infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+    .btn-counter-badge {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background: var(--layer-accent);
+      color: white;
+      border-radius: var(--radius-full);
+      padding: 0 6px;
+      font-size: 0.68rem;
+      font-weight: 800;
+      min-width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid var(--bg-dark);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+      z-index: 10;
+      white-space: nowrap;
+      overflow: visible;
+    }
+
+    .chat-widget-wrapper {
+      position: fixed; bottom: 20px; left: 20px; z-index: 1500;
+    }
+    .chat-widget-btn {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--layer-primary), var(--layer-secondary));
+      color: white; border: none; cursor: pointer;
+      box-shadow: var(--glow-primary);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; transition: var(--transition); position: relative;
+    }
+    .chat-widget-btn::before {
+      content: '';
+      position: absolute; inset: 0; border-radius: 50%;
+      border: 2px solid var(--layer-secondary);
+      animation: ping 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+    @keyframes ping {
+      0% { transform: scale(1); opacity: 0.7; }
+      100% { transform: scale(1.7); opacity: 0; }
+    }
+    .chat-widget-btn:hover { transform: scale(1.08) translateY(-2px); }
+
+    /* ===== تحسينات واجهة الدردشة الحديثة والحضارية ===== */
+    .chat-box {
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      background-color: rgba(5, 6, 12, 0.82);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 2000; display: flex; align-items: center; justify-content: center;
+      animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      padding: 10px;
+    }
+    .chat-inner {
+      width: 100%; max-width: 650px;
+      height: 90vh; max-height: 800px;
+      display: flex; flex-direction: column;
+      border-radius: var(--radius-xl);
+      background: linear-gradient(145deg, rgba(16, 19, 32, 0.95), rgba(10, 11, 18, 0.98));
+      border: 1px solid var(--card-border-strong);
+      box-shadow: var(--shadow-lg), 0 0 40px rgba(109, 94, 248, 0.15);
+      overflow: hidden;
+      animation: chatModalPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes chatModalPop {
+      from { opacity: 0; transform: scale(0.92) translateY(20px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .chat-header {
+      background: linear-gradient(135deg, rgba(25, 28, 48, 0.9), rgba(15, 17, 28, 0.95));
+      padding: 16px 20px; display: flex;
+      justify-content: space-between; align-items: center;
+      border-bottom: 1px solid var(--divider);
+      position: relative;
+    }
+    .chat-header::after {
+      content: '';
+      position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--layer-primary), var(--layer-secondary), transparent);
+      background-size: 200% 100%;
+      animation: scanline 3.5s linear infinite;
+      opacity: 0.85;
+    }
+
+    .chat-users-list {
+      padding: 10px 14px; overflow-x: auto; display: flex; gap: 8px;
+      background: rgba(8, 10, 18, 0.6);
+      border-bottom: 1px solid var(--divider);
+      scrollbar-width: thin;
+    }
+    .chat-users-list::-webkit-scrollbar { height: 5px; }
+    .chat-users-list > div:first-child { display: none; } /* إخفاء النص القديم الزائد وتخصيص شريط أفقياً للأعضاء */
+
+    #usersListContainer {
+      display: flex; gap: 8px; align-items: center; width: 100%;
+    }
+
+    .chat-user-item {
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: var(--radius-full); cursor: pointer; transition: var(--transition);
+      font-size: 0.78rem; white-space: nowrap; flex-shrink: 0;
+    }
+    .chat-user-item:hover { background: rgba(109, 94, 248, 0.15); border-color: rgba(109, 94, 248, 0.3); }
+    .chat-user-item.active {
+      background: linear-gradient(135deg, rgba(109, 94, 248, 0.25), rgba(23, 195, 204, 0.2));
+      border-color: var(--layer-secondary);
+      box-shadow: 0 0 12px rgba(23, 195, 204, 0.2);
+    }
+
+    .online-indicator { width: 8px; height: 8px; background: var(--layer-success-2); border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 8px var(--layer-success-2); }
+    .offline-indicator { width: 8px; height: 8px; background: #565b78; border-radius: 50%; flex-shrink: 0; }
+    .break-indicator { width: 8px; height: 8px; background: var(--layer-warning-2); border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 8px var(--layer-warning-2); }
+    .busy-indicator { width: 8px; height: 8px; background: var(--layer-accent-2); border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 8px var(--layer-accent-2); }
+
+    /* ============================================================
+       📞 نظام الاتصال الصوتي المباشر (WebRTC + Firebase Signaling)
+       ============================================================ */
+    .chat-call-btn {
+      background: rgba(34, 201, 143, 0.15); border: 1px solid rgba(34, 201, 143, 0.35);
+      color: var(--layer-success-2); width: 34px; height: 34px; border-radius: 50%;
+      font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: var(--transition-fast);
+    }
+    .chat-call-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+    .chat-call-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+    .call-overlay {
+      position: fixed; inset: 0; background: rgba(5, 5, 9, 0.84);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      display: flex; align-items: center; justify-content: center; z-index: 3000;
+    }
+    .call-overlay.hidden { display: none; }
+    .call-overlay-inner {
+      background: var(--card-bg); border: 1px solid var(--card-border-strong);
+      border-radius: var(--radius-xl); padding: 38px 30px; width: min(88vw, 340px);
+      text-align: center; box-shadow: var(--shadow-lg);
+    }
+    .call-avatar-circle {
+      width: 94px; height: 94px; border-radius: 50%; margin: 0 auto;
+      background: linear-gradient(135deg, var(--layer-primary), var(--layer-secondary));
+      color: white; font-size: 2.1rem; font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: var(--glow-primary); position: relative;
+    }
+    .call-state-incoming .call-avatar-circle { animation: callPulse 1.4s infinite; }
+    @keyframes callPulse {
+      0% { box-shadow: 0 0 0 0 rgba(109, 94, 248, 0.55); }
+      70% { box-shadow: 0 0 0 24px rgba(109, 94, 248, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(109, 94, 248, 0); }
+    }
+    .call-actions { display: flex; align-items: center; justify-content: center; gap: 22px; margin-top: 26px; }
+    .call-action-btn {
+      width: 56px; height: 56px; border-radius: 50%; border: none; cursor: pointer;
+      font-size: 1.2rem; color: white; display: flex; align-items: center; justify-content: center;
+      transition: var(--transition-fast);
+    }
+    .call-action-btn:hover { transform: translateY(-2px); }
+    .call-accept-btn { background: linear-gradient(135deg, var(--layer-success), var(--layer-success-2)); box-shadow: var(--glow-success); }
+    .call-end-btn { background: linear-gradient(135deg, var(--layer-accent), #e14468); box-shadow: var(--glow-accent); }
+
+    .chat-messages {
+      flex: 1; padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+      position: relative; background: radial-gradient(circle at center, rgba(15, 17, 28, 0.4) 0%, rgba(8, 9, 15, 0.8) 100%);
+    }
+
+    .chat-footer {
+      padding: 14px 18px; background: rgba(18, 20, 31, 0.95); display: flex; gap: 10px; align-items: center;
+      border-top: 1px solid var(--divider);
+    }
+
+    .chat-bg-watermark {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      display: flex; flex-id: column; flex-direction: column; align-items: center; justify-content: center;
+      opacity: 0.15; pointer-events: none; width: 100%; text-align: center;
+    }
+    .chat-bg-watermark .bg-avatar {
+      width: 90px; height: 90px; border-radius: 50%; background: var(--layer-primary);
+      display: flex; align-items: center; justify-content: center; font-size: 2.2rem;
+      font-weight: 800; overflow: hidden; margin-bottom: 8px; box-shadow: 0 0 25px rgba(109, 94, 248, 0.4);
+    }
+    .chat-bg-watermark .bg-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .chat-bg-watermark .bg-name { font-size: 1.1rem; font-weight: 800; color: white; }
+
+    .message-bubble {
+      max-width: 78%; padding: 11px 15px; border-radius: var(--radius-lg); font-size: 0.85rem; line-height: 1.5; z-index: 2; word-break: break-word;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+      animation: messageIn 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    @keyframes messageIn {
+      from { opacity: 0; transform: translateY(8px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .msg-sent {
+      align-self: flex-start;
+      background: linear-gradient(135deg, var(--layer-primary), var(--layer-primary-2));
+      color: white;
+      border-bottom-right-radius: 4px;
+      border-top-right-radius: var(--radius-lg);
+    }
+    .msg-received {
+      align-self: flex-end;
+      background: rgba(28, 32, 50, 0.85);
+      color: #f1f3f9;
+      border-bottom-left-radius: 4px;
+      border-top-left-radius: var(--radius-lg);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .toast-notification {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+      background: var(--card-bg-solid); border: 1px solid var(--layer-secondary);
+      color: white; padding: 9px 18px; border-radius: var(--radius-full);
+      box-shadow: var(--shadow-lg); z-index: 3000;
+      display: flex; align-items: center; gap: 8px; font-size: 0.8rem; font-weight: 700;
+      width: 90%; max-width: 400px; text-align: center; justify-content: center;
+      animation: toastIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translate(-50%, -12px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    body {
+      padding-top: max(12px, env(safe-area-inset-top));
+      padding-bottom: max(12px, env(safe-area-inset-bottom));
+      padding-left: max(12px, env(safe-area-inset-left));
+      padding-right: max(12px, env(safe-area-inset-right));
+    }
+
+    .btn, .close-btn, .link-btn, .toggle-password, .chat-widget-btn,
+    .chat-user-item, .upload-box, th, td button {
+      touch-action: manipulation;
+    }
+
+    #dashboard-header {
+      position: sticky;
+      top: max(8px, env(safe-area-inset-top));
+      z-index: 150;
+    }
+
+    #header-action-buttons {
+      overflow-x: auto;
+      overflow-y: visible;
+      padding: 6px 4px 8px;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+      display: flex;
+      gap: 8px;
+    }
+    #header-action-buttons::-webkit-scrollbar { display: none; }
+    #header-action-buttons .btn { flex-shrink: 0; }
+
+    .table-container {
+      -webkit-mask-image: linear-gradient(to left, transparent 0, black 16px, black calc(100% - 16px), transparent 100%);
+      mask-image: linear-gradient(to left, transparent 0, black 16px, black calc(100% - 16px), transparent 100%);
+    }
+    @media (min-width: 768px) {
+      .table-container { -webkit-mask-image: none; mask-image: none; }
+    }
+
+    @media (max-width: 600px) {
+      .form-input, select.form-input, textarea.form-input, .chat-messages input { font-size: 16px; }
+
+      .btn { min-height: 46px; }
+      .close-btn { min-width: 38px; min-height: 38px; }
+      .toggle-password { padding: 10px; }
+      .chat-widget-btn { width: 54px; height: 54px; }
+      .chat-inner { height: 100vh; max-height: 100vh; border-radius: 0; }
+
+      .panel-nav { flex-direction: column; align-items: stretch; gap: 10px; }
+      .user-profile-header { justify-content: flex-start; }
+      #header-action-buttons { width: 100%; }
+
+      .card-header-flex { flex-direction: column; align-items: stretch; }
+      .card-header-flex .btn-excel { width: 100%; justify-content: center; padding: 10px 14px; }
+
+      .modal-body { padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+      .chat-footer { padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+      .chat-widget-wrapper { bottom: max(18px, env(safe-area-inset-bottom)); left: 16px; }
+
+      #login-card, #reset-card, #change-pass-card { margin: 10px auto !important; }
+
+      .stats-grid { gap: 8px; }
+    }
+
+    @media (max-width: 380px) {
+      .brand-title { font-size: 1.15rem; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+      table { font-size: 0.75rem; }
+    }
+
+    @media (min-width: 768px) {
+      body { padding: 20px; }
+      .glass-card { padding: 26px; border-radius: var(--radius-xl); }
+      .brand-title { font-size: 1.55rem; }
+      .brand-icon { width: 62px; height: 62px; font-size: 26px; }
+      .form-input { padding: 12px 42px; font-size: 0.9rem; }
+      .input-wrapper i.field-icon { right: 14px; font-size: 0.95rem; }
+      .toggle-password { left: 14px; font-size: 0.95rem; }
+      .btn { padding: 12px 20px; font-size: 0.9rem; }
+      .modal-header { padding: 20px 32px; }
+      .modal-body { padding: 28px 32px; }
+      .table-container { overflow-x: visible; }
+      table { font-size: 0.85rem; min-width: 100%; }
+      th, td { padding: 13px 15px; }
+    }
+
+    /* ===== بطاقات تفاصيل التقييم (شاشة الموظف) ===== */
+    .eval-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .eval-metric-box {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-md);
+      padding: 10px 8px;
+      text-align: center;
+    }
+    .eval-metric-label {
+      font-size: 0.68rem;
+      color: var(--text-sub);
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .eval-metric-value {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--layer-secondary-2);
+    }
+
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- 1. تسجيل الدخول -->
+    <div id="login-card" class="glass-card" style="max-width: 420px; margin: 30px auto;">
+      <div class="brand-header">
+        <div class="brand-icon"><i class="fa-solid fa-bolt"></i></div>
+        <h1 class="brand-title">EasyPass</h1>
+        <div class="status-indicator" style="margin-top: 8px;"><span class="pulse-dot"></span>  الان نبدو اقرب واقرب </div>
+      </div>
+
+      <form id="login-form" onsubmit="event.preventDefault(); login();">
+        <div class="input-group">
+          <label>Domain User </label>
+          <div class="input-wrapper">
+            <input type="text" id="login-input" class="form-input" placeholder="أدخل بيانات الحساب" required>
+            <i class="fa-solid fa-user field-icon"></i>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label>كلمة المرور</label>
+          <div class="input-wrapper">
+            <input type="password" id="password" class="form-input" placeholder="••••••••" required>
+            <i class="fa-solid fa-lock field-icon"></i>
+            <i class="fa-solid fa-eye toggle-password" onclick="togglePasswordVisibility('password', this)"></i>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top: 8px;">
+          <i class="fa-solid fa-right-to-bracket"></i> تسجيل الدخول
+        </button>
+
+        <div style="text-align: center; margin-top: 12px;">
+          <button type="button" class="link-btn" onclick="showResetCard()">
+            <i class="fa-solid fa-rotate-left"></i> نسيت كلمة المرور؟ (إعادة تعيين)
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 2. استعادة كلمة المرور -->
+    <div id="reset-card" class="glass-card hidden" style="max-width: 420px; margin: 30px auto;">
+      <div class="brand-header">
+        <div class="brand-icon" style="background: linear-gradient(135deg, var(--layer-warning), #d97706);">
+          <i class="fa-solid fa-key"></i>
+        </div>
+        <h1 class="brand-title">استعادة كلمة المرور</h1>
+      </div>
+
+      <form onsubmit="event.preventDefault(); resetPassword();">
+        <div class="input-group">
+          <label>أدخل اسم المستخدم أو الإيميل الخاص بك</label>
+          <div class="input-wrapper">
+            <input type="text" id="reset-username-input" class="form-input" placeholder="اسم المستخدم أو الإيميل" required>
+            <i class="fa-solid fa-user field-icon"></i>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-warning">
+          <i class="fa-solid fa-rotate-left"></i> استعادة كلمة المرور الافتراضية (123)
+        </button>
+
+        <div style="text-align: center; margin-top: 12px;">
+          <button type="button" class="link-btn" onclick="showLoginCard()">
+            <i class="fa-solid fa-arrow-right"></i> إلغاء والعودة
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 3. تغيير كلمة المرور الافتراضية عند أول دخول -->
+    <div id="change-pass-card" class="glass-card hidden" style="max-width: 420px; margin: 30px auto;">
+      <div class="brand-header">
+        <div class="brand-icon" style="background: linear-gradient(135deg, var(--layer-accent), var(--layer-warning));">
+          <i class="fa-solid fa-shield-halved"></i>
+        </div>
+        <h1 class="brand-title">تغيير كلمة المرور الافتراضية</h1>
+        <p style="font-size: 0.8rem; color: var(--text-sub); margin-top: 4px;">
+          هذه أول مرة تقوم فيها بتسجيل الدخول، يرجى تعيين كلمة مرور جديدة لأمان حسابك.
+        </p>
+      </div>
+
+      <form onsubmit="event.preventDefault(); forceChangePassword();">
+        <div class="input-group">
+          <label>كلمة المرور الجديدة</label>
+          <div class="input-wrapper">
+            <input type="password" id="new-pass-input" class="form-input" placeholder="أدخل كلمة المرور" required minlength="4">
+            <i class="fa-solid fa-lock field-icon"></i>
+            <i class="fa-solid fa-eye toggle-password" onclick="togglePasswordVisibility('new-pass-input', this)"></i>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label>تأكيد كلمة المرور</label>
+          <div class="input-wrapper">
+            <input type="password" id="confirm-pass-input" class="form-input" placeholder="أعِد كتابة كلمة المرور" required minlength="4">
+            <i class="fa-solid fa-lock field-icon"></i>
+            <i class="fa-solid fa-eye toggle-password" onclick="togglePasswordVisibility('confirm-pass-input', this)"></i>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-success" style="margin-top: 8px;">
+          <i class="fa-solid fa-check"></i> حفظ كلمة المرور والدخول
+        </button>
+      </form>
+    </div>
+
+    <!-- الهيدر الموحد لجميع المستخدمين بعد تسجيل الدخول -->
+    <div id="dashboard-header" class="glass-card hidden" style="padding: 12px 16px; margin-bottom: 14px;">
+      <div class="panel-nav">
+        <div class="user-profile-header">
+          <div class="avatar-circle" id="avatarDisplay">
+            <span id="avatarInitial">U</span>
+          </div>
+          <div class="user-info-text">
+            <span id="user-display-name" class="user-name">...</span>
+            <span id="user-display-role" class="user-role">...</span>
+          </div>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;" id="header-action-buttons">
+          <div class="status-indicator"><span class="pulse-dot"></span> مزامنة حية</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة تعديل الحساب -->
+    <div id="accountSettingsModal" class="modal-overlay hidden">
+      <div class="modal-content" style="max-width: 420px;">
+        <div class="modal-header">
+          <h3 style="font-size: 0.95rem;"><i class="fa-solid fa-user-gear" style="color:var(--layer-secondary);"></i> إعدادات الحساب (كلمة السر والصورة)</h3>
+          <button onclick="closeAccountSettingsModal()" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <form onsubmit="event.preventDefault(); updateAccountSettings();">
+            <div class="input-group">
+              <label>تحميل الصورة الشخصية من الجهاز (الحد الأقصى 300 كيلوبايت)</label>
+              <div class="upload-box" onclick="document.getElementById('settings-avatar-file').click()" style="padding: 12px; margin-bottom: 6px;">
+                <i class="fa-solid fa-cloud-arrow-up" style="font-size: 1.3rem; color: var(--layer-primary); margin-bottom: 4px;"></i>
+                <p style="font-size:0.75rem; font-weight:700;">اضغط لاختيار صورة من جهازك</p>
+                <span id="settings-avatar-name" style="font-size:0.7rem; color:var(--layer-secondary);">لم يتم اختيار صورة بعد</span>
+                <input type="file" id="settings-avatar-file" accept="image/*" class="hidden" onchange="handleAvatarFileSelect(event)">
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>كلمة المرور الجديدة (اختياري)</label>
+              <div class="input-wrapper">
+                <input type="password" id="settings-pass-input" class="form-input" placeholder="اتركها فارغة إن لم تكن ترغب بتغييرها" minlength="4">
+                <i class="fa-solid fa-lock field-icon"></i>
+                <i class="fa-solid fa-eye toggle-password" onclick="togglePasswordVisibility('settings-pass-input', this)"></i>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="margin-top:8px;">
+              <i class="fa-solid fa-floppy-disk"></i> حفظ التحديثات في السيرفر
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة عرض المشكلات والتعليقات الخاصة بالمؤظف -->
+    <div id="myIssuesModal" class="modal-overlay hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 style="font-size: 0.95rem;"><i class="fa-solid fa-triangle-exclamation" style="color:var(--layer-secondary);"></i> المشكلات والتعليقات التي أرفقتها</h3>
+          <button onclick="closeMyIssuesModal()" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>التصنيف</th>
+                  <th>التفاصيل والملاحظات</th>
+                  <th>التوقيت</th>
+                  <th>إجراء الحذف</th>
+                </tr>
+              </thead>
+              <tbody id="my-issues-table-body">
+                <tr><td colspan="4" style="text-align:center;">جاري جلب بلاغاتك...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة إرسال طلب جديد من الموظف -->
+    <div id="sendRequestModal" class="modal-overlay hidden">
+      <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-header">
+          <h3 style="font-size: 0.95rem;"><i class="fa-solid fa-file-circle-plus" style="color:var(--layer-success);"></i> إرسال طلب جديد للمشرفين</h3>
+          <button onclick="closeSendRequestModal()" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <form onsubmit="event.preventDefault(); submitCustomRequest();">
+            <div class="input-group">
+              <label>الاسم الكامل</label>
+              <div class="input-wrapper">
+                <input type="text" id="req-name" class="form-input" placeholder="اسم الموظف" required>
+                <i class="fa-solid fa-user field-icon"></i>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>الرقم الوظيفي</label>
+              <div class="input-wrapper">
+                <input type="text" id="req-id" class="form-input" placeholder="مثال: EMP-9082" required>
+                <i class="fa-solid fa-id-card field-icon"></i>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>الرقم الوطني</label>
+              <div class="input-wrapper">
+                <input type="text" id="req-national-id" class="form-input" placeholder="الرقم الوطني المكون من أرقام" required>
+                <i class="fa-solid fa-address-card field-icon"></i>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>الحالة</label>
+              <div class="input-wrapper">
+                <input type="text" id="req-status" class="form-input" value="idle" readonly style="background: rgba(255,255,255,0.05); color: var(--layer-secondary); font-weight: bold;">
+                <i class="fa-solid fa-tag field-icon"></i>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-success" style="margin-top:8px;">
+              <i class="fa-solid fa-paper-plane"></i> إرسال الطلب للمشرفين
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة عرض البهيفيرات والتحذيرات المهنية -->
+    <div id="behaviorsModal" class="modal-overlay hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 style="font-size: 0.95rem;"><i class="fa-solid fa-shield-halved" style="color:var(--layer-accent);"></i> سجل البهيفيرات والتحذيرات المهنية</h3>
+          <button onclick="closeBehaviorsModal()" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body" id="behaviorsModalBody">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>المشرف الرافع</th>
+                  <th>الموظف المستهدف</th>
+                  <th>نوع البهيفير</th>
+                  <th>التفاصيل والردود الحصرية</th>
+                  <th>التاريخ والإجراء</th>
+                </tr>
+              </thead>
+              <tbody id="behaviors-table-body">
+                <tr><td colspan="5" style="text-align:center;">لا توجد تحذيرات أو بهيفيرات مسجلة حالياً.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة طلبات الموظفين للمشرفين -->
+    <div id="adminRequestsModal" class="modal-overlay hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 style="font-size: 0.95rem;"><i class="fa-solid fa-list-check" style="color:var(--layer-secondary);"></i> طلبات جميع الموظفين</h3>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn btn-excel" onclick="exportToExcel('all-requests-table-element', 'طلبات_الموظفين_المرسلة')">
+              <i class="fa-solid fa-file-excel"></i> تنزيل الطلبات
+            </button>
+            <button onclick="closeAdminRequestsModal()" class="close-btn">&times;</button>
+          </div>
+        </div>
+        <div class="modal-body">
+          <div class="table-container">
+            <table id="all-requests-table-element">
+              <thead>
+                <tr>
+                  <th>اسم الموظف المرسل</th>
+                  <th>الاسم بالطلب</th>
+                  <th>الرقم الوظيفي</th>
+                  <th>الرقم الوطني</th>
+                  <th>الحالة</th>
+                  <th>التوقيت</th>
+                  <th>إجراء</th>
+                </tr>
+              </thead>
+              <tbody id="all-requests-table-body">
+                <tr><td colspan="7" style="text-align:center;">جاري جلب الطلبات...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة أرشيف التقييمات السابقة للمشرفين -->
+    <div id="evaluationsArchiveModal" class="modal-overlay hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 style="font-size: 0.95rem;"><i class="fa-solid fa-box-archive" style="color:var(--layer-warning);"></i> أرشيف التقييمات السابقة</h3>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn btn-excel" onclick="exportToExcel('archive-table-element', 'أرشيف_التقييمات_السابقة')">
+              <i class="fa-solid fa-file-excel"></i> تصدير الأرشيف
+            </button>
+            <!-- زر حذف جميع التقييمات السابقة في الأرشيف -->
+            <button class="btn btn-accent" style="width:auto; padding:7px 13px; font-size:0.78rem;" onclick="clearAllArchiveEvaluations()">
+              <i class="fa-solid fa-trash-can"></i> حذف الأرشيف
+            </button>
+            <button onclick="closeEvaluationsArchiveModal()" class="close-btn">&times;</button>
+          </div>
+        </div>
+        <div class="modal-body">
+          <div class="table-container">
+            <table id="archive-table-element">
+              <thead>
+                <tr>
+                  <th>الموظف</th>
+                  <th>الكود الوظيفي</th>
+                  <th>التقييم السابق</th>
+                  <th>الملاحظات السابقة</th>
+                  <th>تاريخ الأرشفة</th>
+                </tr>
+              </thead>
+              <tbody id="archive-table-body">
+                <tr><td colspan="5" style="text-align:center;">جاري جلب سجل الأرشيف...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة أرشيف تقييمات الموظف الحالي (يرى تقييماته فقط) -->
+    <div id="employeeArchiveModal" class="modal-overlay hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 style="font-size: 0.95rem;"><i class="fa-solid fa-box-archive" style="color:var(--layer-warning);"></i> أرشيف تقييماتي السابقة</h3>
+          <button onclick="closeEmployeeArchiveModal()" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="table-container">
+            <table id="employee-archive-table-element">
+              <thead>
+                <tr>
+                  <th>التقييم</th>
+                  <th>الملاحظات</th>
+                  <th>تاريخ الأرشفة</th>
+                </tr>
+              </thead>
+              <tbody id="employee-archive-table-body">
+                <tr><td colspan="3" style="text-align:center;">جاري جلب سجل تقييماتك السابقة...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- نافذة إرسال بهيفير أو تحذير لموظف -->
+    <div id="sendBehaviorModal" class="modal-overlay hidden">
+      <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-header">
+          <h3 style="font-size: 0.95rem;"><i class="fa-solid fa-bullhorn" style="color:var(--layer-accent);"></i> إرسال تحذير أو بهيفير لموظف</h3>
+          <button onclick="closeSendBehaviorModal()" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <form onsubmit="event.preventDefault(); submitBehaviorToEmployee();">
+            <div class="input-group">
+              <label>اختر الموظف المستهدف</label>
+              <div class="input-wrapper">
+                <select id="bh-target-select" class="form-input" required>
+                  <option value="" disabled selected>جاري تحميل قائمة الموظفين...</option>
+                </select>
+                <i class="fa-solid fa-user-tag field-icon"></i>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>نوع البهيفير / التحذير</label>
+              <div class="input-wrapper">
+                <select id="bh-type" class="form-input" required>
+                  <option value="" disabled selected>اختر نوع التحذير...</option>
+                  <option value="تنبيه تأخير عن العمل">تنبيه تأخير عن العمل</option>
+                  <option value="مخالفة سلوك مهني (Behavior)">مخالفة سلوك مهني (Behavior)</option>
+                  <option value="تنبيه أدائي">تنبيه أدائي</option>
+                  <option value="شكر وتقدير">شكر وتقدير</option>
+                </select>
+                <i class="fa-solid fa-triangle-exclamation field-icon"></i>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>التفاصيل والملاحظات</label>
+              <div class="input-wrapper">
+                <textarea id="bh-comment" class="form-input" required placeholder="اكتب تفاصيل البهيفير أو التحذير هنا..."></textarea>
+                <i class="fa-solid fa-comment-dots field-icon" style="top:12px;"></i>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-accent" style="margin-top:8px;">
+              <i class="fa-solid fa-paper-plane"></i> إرسال التحذير مع إظهار اسمك كمشرف
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. واجهة الموظف -->
+    <div id="panel-employee" class="view-panel hidden">
+      <div class="glass-card">
+        <h3><i class="fa-solid fa-id-card" style="color: var(--layer-secondary);"></i> بياناتك المسجلة (مزامنة سحابية حية)</h3>
+        <div style="margin-top: 10px; font-size: 0.85rem; line-height: 1.7;">
+          <p>📌 **الرقم الوظيفي (UNI/ID):** <span id="emp-uid-display" style="color:var(--layer-secondary); font-weight:bold;">-</span></p>
+          <p>⭐ **التقييم الحالي الشهري:** <strong id="emp-score" style="color: var(--layer-success); font-size: 1.1rem;">-</strong> / 100</p>
+          <p>📝 **توجيهات وملاحظات المشرف:** <span id="emp-notes" style="color: white;">-</span></p>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+          <h3 style="margin:0;"><i class="fa-solid fa-chart-line" style="color:var(--layer-warning);"></i> تفاصيل التقييم الشهري</h3>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-warning" style="width:auto; padding:5px 10px; font-size:0.68rem;" onclick="openEmployeeArchiveModal()">
+              <i class="fa-solid fa-box-archive"></i> أرشيف تقييماتي السابقة
+            </button>
+            <button type="button" class="btn btn-secondary" style="width:auto; padding:5px 10px; font-size:0.68rem;" onclick="toggleEvalLabelsMode()">
+              <i class="fa-solid fa-tags"></i> <span id="evalLabelsToggleText">تسميات مختصرة</span>
+            </button>
+          </div>
+        </div>
+        <div class="eval-metrics-grid">
+          <div class="eval-metric-box">
+            <div class="eval-metric-label" data-full="Answered" data-short="Ans.">Answered</div>
+            <div class="eval-metric-value" id="emp-eval-answered">-</div>
+          </div>
+          <div class="eval-metric-box">
+            <div class="eval-metric-label" data-full="On Queue" data-short="OnQ">On Queue</div>
+            <div class="eval-metric-value" id="emp-eval-onqueue">-</div>
+          </div>
+          <div class="eval-metric-box">
+            <div class="eval-metric-label" data-full="Handling Time" data-short="AHT">Handling Time</div>
+            <div class="eval-metric-value" id="emp-eval-handling">-</div>
+          </div>
+          <div class="eval-metric-box">
+            <div class="eval-metric-label" data-full="Hold Time" data-short="Hold">Hold Time</div>
+            <div class="eval-metric-value" id="emp-eval-hold">-</div>
+          </div>
+          <div class="eval-metric-box">
+            <div class="eval-metric-label" data-full="Quality Calls" data-short="QC">Quality Calls</div>
+            <div class="eval-metric-value" id="emp-eval-quality">-</div>
+          </div>
+          <div class="eval-metric-box">
+            <div class="eval-metric-label" data-full="Knowledge Level" data-short="KL">Knowledge Level</div>
+            <div class="eval-metric-value" id="emp-eval-knowledge">-</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <h3><i class="fa-solid fa-paper-plane" style="color:var(--layer-primary);"></i> إرسال أو رفع بلاغ ومشكلة جديدة</h3>
+        <form onsubmit="event.preventDefault(); submitReport();" style="margin-top: 10px;">
+          <div class="input-group">
+            <label>تصنيف المشكلة الرئيسي <span style="color: var(--layer-accent);">*</span></label>
+            <div class="input-wrapper">
+              <select id="issue-category" class="form-input" required>
+                <option value="" disabled selected>اختر نوع العطل الذي تواجهه...</option>
+                <option value="مشكلة VPN">🔒 مشكلة اتصال VPN</option>
+                <option value="مشكلة تقنية">💻 مشكلة تقنية / أجهزة وسيرفرات</option>
+                <option value="انقطاع انترنت">🌐 انقطاع الإنترنت / الشبكة</option>
+                <option value="مشكلة إدارية">📋 مشكلة إدارية / مناوبات</option>
+                <option value="انقطاع كهرباء">⚡ انقطاع الكهرباء</option>
+              </select>
+              <i class="fa-solid fa-list field-icon"></i>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label>تفاصيل ووصف البلاغ</label>
+            <div class="input-wrapper">
+              <textarea id="issue-comment" class="form-input" required placeholder="يرجى توضيح التفاصيل للتقديم على مساعدة فورية..."></textarea>
+              <i class="fa-solid fa-comment-dots field-icon" style="top:12px;"></i>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary">
+            <i class="fa-solid fa-paper-plane"></i> إرسال البلاغ فوراً
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 5. واجهة المشرف التقني / الفني -->
+    <div id="panel-tech-admin" class="view-panel hidden">
+      <div class="glass-card">
+        <div class="card-header-flex">
+          <div>
+            <h3><i class="fa-solid fa-user-shield" style="color: var(--layer-secondary);"></i> لوحة المشرف التقني والفني (VPN & Tech)</h3>
+            <p style="font-size: 0.75rem; color: var(--text-sub);">متابعة وتصدير بلاغات الـ VPN والمشكلات التقنية مع خيار حذف البلاغات.</p>
+          </div>
+          <button class="btn btn-excel" onclick="exportToExcel('tech-admin-table-element', 'تقارير_المشرف_التقني')">
+            <i class="fa-solid fa-file-excel"></i> تصدير Excel
+          </button>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon" style="background: rgba(244, 63, 94, 0.2); color: #fda4af;"><i class="fa-solid fa-lock"></i></div>
+            <div>
+              <div style="font-size: 1.1rem; font-weight: 800;" id="techadmin-vpn-count">0</div>
+              <div style="font-size: 0.7rem; color: var(--text-sub);">أعطال VPN</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: rgba(6, 182, 212, 0.2); color: #67e8f9;"><i class="fa-solid fa-laptop-code"></i></div>
+            <div>
+              <div style="font-size: 1.1rem; font-weight: 800;" id="techadmin-tech-count">0</div>
+              <div style="font-size: 0.7rem; color: var(--text-sub);">أعطال تقنية</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table id="tech-admin-table-element">
+            <thead>
+              <tr>
+                <th>الموظف (مع الصورة)</th>
+                <th>الهاتف</th>
+                <th>الباتش/الكود</th>
+                <th>التصنيف</th>
+                <th>التفاصيل والملاحظات</th>
+                <th>التوقيت</th>
+                <th>إجراء الحذف</th>
+              </tr>
+            </thead>
+            <tbody id="tech-admin-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. واجهة Business Support / Team Leader -->
+    <div id="panel-bs" class="view-panel hidden">
+      <div class="glass-card">
+        <div class="card-header-flex">
+          <h3><i class="fa-solid fa-star" style="color: var(--layer-warning);"></i> تقييمات الموظفين الحالية</h3>
+          <button class="btn btn-excel" onclick="exportToExcel('bs-evaluations-table-element', 'تقييمات_الموظفين')">
+            <i class="fa-solid fa-file-excel"></i> تنزيل Excel
+          </button>
+        </div>
+        <div class="table-container">
+          <table id="bs-evaluations-table-element">
+            <thead>
+              <tr>
+                <th>الموظف</th>
+                <th>اسم المستخدم</th>
+                <th>التقييم</th>
+                <th>الملاحظات</th>
+                <th>تاريخ التحديث</th>
+              </tr>
+            </thead>
+            <tbody id="bs-evaluations-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. واجهة المشرف العام (Super Admin) -->
+    <div id="panel-admin" class="view-panel hidden">
+      <div class="glass-card">
+        <h3><i class="fa-solid fa-file-excel" style="color: var(--layer-success);"></i> رفع التقييمات وأرشفة القديم تلقائياً</h3>
+        <div class="upload-box" onclick="document.getElementById('excel-file-input').click()" style="margin-top: 10px;">
+          <i class="fa-solid fa-cloud-arrow-up" style="font-size: 1.8rem; color: var(--layer-primary); margin-bottom: 6px;"></i>
+          <p style="font-size:0.8rem; font-weight:700;">اضغط لاختيار ملف (Excel / CSV)</p>
+          <span id="file-name-label" style="font-size:0.75rem; color: var(--layer-secondary);">لم يتم اختيار ملف بعد</span>
+          <input type="file" id="excel-file-input" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleFileSelect(event)">
+        </div>
+
+        <button type="button" class="btn btn-success" onclick="uploadDataToFirebase()">
+          <i class="fa-solid fa-database"></i> حفظ التقييمات وإرسال الإشعارات
+        </button>
+      </div>
+
+      <div class="glass-card">
+        <div class="card-header-flex">
+          <h3><i class="fa-solid fa-star" style="color: var(--layer-warning);"></i> التقييمات الحالية</h3>
+          <button class="btn btn-excel" onclick="exportToExcel('admin-evaluations-table-element', 'تقييمات_الموظفين')">
+            <i class="fa-solid fa-file-excel"></i> تصدير Excel
+          </button>
+        </div>
+        <div class="table-container">
+          <table id="admin-evaluations-table-element">
+            <thead>
+              <tr>
+                <th>الموظف</th>
+                <th>اسم المستخدم</th>
+                <th>التقييم</th>
+                <th>الملاحظات</th>
+                <th>التاريخ</th>
+              </tr>
+            </thead>
+            <tbody id="admin-evaluations-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- قسم مشاهدة جميع البلاغات والمشكلات للمشرف العام (Admin) -->
+      <div class="glass-card" style="margin-top: 16px; border-color: rgba(245, 158, 11, 0.4);">
+        <div class="card-header-flex">
+          <div>
+            <h3><i class="fa-solid fa-triangle-exclamation" style="color: var(--layer-warning);"></i> سجل جميع بلاغات ومشكلات الموظفين (الكهرباء، VPN، والمزيد)</h3>
+            <p style="font-size: 0.75rem; color: var(--text-sub);">صلاحية المشرف العام للاطلاع المباشر والتحكم في كافة البلاغات الواردة من الموظفين.</p>
+          </div>
+          <button class="btn btn-excel" onclick="exportToExcel('admin-all-reports-table-element', 'جميع_بلاغات_الموظفين')">
+            <i class="fa-solid fa-file-excel"></i> تصدير البلاغات
+          </button>
+        </div>
+        <div class="table-container">
+          <table id="admin-all-reports-table-element">
+            <thead>
+              <tr>
+                <th>الموظف</th>
+                <th>الفرع/الرقم</th>
+                <th>تصنيف البلاغ</th>
+                <th>تفاصيل المشكلة والوصف</th>
+                <th>التوقيت</th>
+                <th>الإجراء</th>
+              </tr>
+            </thead>
+            <tbody id="admin-all-reports-table-body">
+              <tr><td colspan="6" style="text-align:center;">جاري جلب كافة البلاغات...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- نافذة الشات العائمة مع عداد الرسائل الرقمي -->
+  <div class="chat-widget-wrapper">
+    <button id="chatWidgetBtn" class="chat-widget-btn hidden" onclick="toggleChatWindow()">
+      <i class="fa-solid fa-comments"></i>
+      <span id="totalChatBadge" class="btn-counter-badge hidden">0</span>
+    </button>
+  </div>
+
+  <!-- واجهة الدردشة الحديثة والحضارية المطورة -->
+  <div id="chatBox" class="chat-box hidden">
+   <div class="chat-inner">
+    <div class="chat-header">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div id="chatHeaderAvatar" style="width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, var(--layer-primary), var(--layer-secondary)); display: flex; align-items: center; justify-content: center; color: white; overflow: hidden;">
+          <i class="fa-solid fa-comments"></i>
+        </div>
+        <div>
+          <strong id="chatHeaderTitle" style="font-size:0.9rem; display:block; color:white;">الدردشة المباشرة</strong>
+          <span style="font-size:0.7rem; color: var(--layer-success-2);" id="chatPartnerStatusText">اختر مستخدماً لبدء المحادثة</span>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button id="voiceCallBtn" class="chat-call-btn hidden" title="اتصال صوتي" onclick="startVoiceCall()">
+          <i class="fa-solid fa-phone"></i>
+        </button>
+        <button id="clearChatBtn" class="hidden" title="مسح الدردشة من الطرفين" onclick="clearChatForBoth()" style="background:rgba(251,90,126,0.15); border:1px solid rgba(251,90,126,0.3); color:var(--layer-accent); width:34px; height:34px; border-radius:50%; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:var(--transition-fast);">
+          <i class="fa-solid fa-trash-can"></i>
+        </button>
+        <button onclick="toggleChatWindow()" class="close-btn" style="font-size:16px;">&times;</button>
+      </div>
+    </div>
+
+    <div class="chat-users-list" id="chatUsersList">
+      <div style="font-size:0.7rem; color:var(--text-sub); margin-bottom:3px;">المشرفون والأقسام:</div>
+      <div id="usersListContainer"></div>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+      <div id="chatWatermark" class="chat-bg-watermark">
+        <div class="bg-avatar" id="bgAvatarContainer">U</div>
+        <div class="bg-name" id="bgNameContainer">اختر مستخدماً للدردشة</div>
+      </div>
+    </div>
+
+    <div class="chat-footer">
+      <input type="text" id="chatInput" class="form-input" placeholder="اكتب رسالتك هنا..." style="padding: 10px 14px; font-size:0.85rem;" onkeypress="if(event.key==='Enter') sendChatMessage()">
+      <button class="btn btn-primary" style="width: auto; padding: 10px 18px; border-radius: var(--radius-md);" onclick="sendChatMessage()">
+        <i class="fa-solid fa-paper-plane"></i>
+      </button>
+    </div>
+   </div>
+  </div>
+
+  <!-- تراكب المكالمة الصوتية العائم (WebRTC Call Overlay) -->
+  <div id="callOverlay" class="call-overlay hidden">
+    <div class="call-overlay-inner">
+      <div class="call-avatar-circle" id="callAvatarCircle">U</div>
+      <h3 id="callPartnerName" style="color:var(--text-main); margin-top:14px; font-size:1.1rem;">...</h3>
+      <p id="callStatusText" style="color:var(--text-sub); font-size:0.85rem; margin-top:4px;">جاري الاتصال...</p>
+      <audio id="remoteAudio" autoplay></audio>
+      <div class="call-actions">
+        <button id="callAcceptBtn" class="call-action-btn call-accept-btn hidden" title="قبول المكالمة" onclick="acceptIncomingCall()">
+          <i class="fa-solid fa-phone"></i>
+        </button>
+        <button id="callEndBtn" class="call-action-btn call-end-btn" title="إنهاء المكالمة" onclick="endCall(true)">
+          <i class="fa-solid fa-phone-slash"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* usersDB: نسخة احتياطية محلية تُستخدم فقط إذا تعذّر الوصول لـ Firebase.
+       المصدر الأساسي والموحّد لكل المستخدمين هو window.USERS_SEED المعرّف
+       أعلى هذا الملف (نفس القائمة موجودة أيضاً داخل ccare.html). */
+    let usersDB = window.USERS_SEED ? JSON.parse(JSON.stringify(window.USERS_SEED)) : {
+      "admin": { username: "admin", name: "المشرف العام", role: "admin", password: "123", badge: "ADM-01" },
+      "tech": { username: "tech", name: "المشرف التقني", role: "tech_admin", password: "123", badge: "TEC-01" },
+      "bs": { username: "bs", name: "مشرف الأعمال", role: "bs", password: "123", badge: "BS-01" },
+      "emp1": { username: "emp1", name: "أحمد محمد", role: "employee", password: "123", badge: "EMP-101", uid: "9081", phone: "+249912345678" }
+    };
+
+    let selectedExcelData = null;
+    let currentUser = null;
+    let currentLoginKey = null; 
+    let currentPendingUsername = null;
+    let selectedChatPartner = null;
+    let selectedChatPartnerData = null;
+    let allLoadedUsersCache = {}; 
+    let newAvatarBase64 = null;
+
+    let unsubscribeReports = null;
+    let unsubscribeEvaluations = null;
+    let unsubscribeEmpEval = null;
+    let unsubscribeChat = null;
+    let unsubscribeUsersPresence = null;
+    let unsubscribeCustomRequests = null;
+    let unsubscribeBehaviors = null;
+
+    let lastProcessedReportId = null;
+    let lastEmpScore = null;
+    let unreadMessagesMap = {}; 
+    let chatWindowOpen = false;
+
+    let newRequestsCount = 0;
+    let newBehaviorsCount = 0;
+    let newIssuesCount = 0;
+
+    /* ============================================================
+       📞 متغيرات نظام الاتصال الصوتي المباشر (WebRTC)
+       ============================================================ */
+    const RTC_CONFIG = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ]
+    };
+    const PRIVILEGED_CALL_ROLES = ['admin', 'tech_admin', 'bs']; // المشرفون / قادة الفرق / التقنيون
+    function isPrivilegedCallRole(role) { return PRIVILEGED_CALL_ROLES.includes(role); }
+
+    let localCallStream = null;
+    let peerConnection = null;
+    let currentCallDocId = null;
+    let currentCallRole = null;      // 'caller' | 'callee'
+    let currentCallPartner = null;   // { username, name }
+    let unsubscribeCallDoc = null;
+    let unsubscribeRemoteCandidates = null;
+    let unsubscribeIncomingCalls = null;
+    let callTimeoutHandle = null;
+    let ringtoneIntervalId = null;   // مؤقّت تكرار نغمة الرنين أثناء المكالمة الواردة
+    let micPrimed = false;           // لمنع طلب صلاحية الميكروفون من المتصفح أكثر من مرة
+
+    window.addEventListener('beforeunload', () => {
+      if (currentUser) setUserOnlineStatus(currentUser.username, false);
+      if (currentCallDocId && window.db) {
+        try { window.updateDoc(window.doc(window.db, "calls", currentCallDocId), { status: 'ended' }); } catch (e) {}
+      }
+    });
+
+    async function setUserOnlineStatus(username, status) {
+      if (usersDB[username]) {
+        usersDB[username].isOnline = status;
+      }
+      if (window.db) {
+        try {
+          await window.updateDoc(window.doc(window.db, "system_users", username), { isOnline: status });
+        } catch(e) { console.log(e); }
+      }
+    }
+
+    /* ------------------------------------------------------------
+       يحدّث حقول حالة الاتصال الحية (isOnBreak / inCall / callStatus)
+       دون المساس بحقل isOnline الأصلي أو أي حقل آخر من حقول المستخدم.
+       callStatus المشتقة تُكتب بإحدى القيم: online / break / busy / offline
+       ------------------------------------------------------------ */
+    async function syncCallStatusField(username, extra = {}) {
+      if (!window.db) return;
+      const u = allLoadedUsersCache[username] || {};
+      const isOnline = extra.hasOwnProperty('isOnline') ? extra.isOnline : !!u.isOnline;
+      const isOnBreak = extra.hasOwnProperty('isOnBreak') ? extra.isOnBreak : !!u.isOnBreak;
+      const inCall = extra.hasOwnProperty('inCall') ? extra.inCall : !!u.inCall;
+
+      let callStatus = 'offline';
+      if (isOnline) {
+        callStatus = inCall ? 'busy' : (isOnBreak ? 'break' : 'online');
+      }
+
+      try {
+        await window.updateDoc(window.doc(window.db, "system_users", username), { isOnBreak, inCall, callStatus });
+      } catch (e) { console.log("syncCallStatusField:", e); }
+    }
+
+    function playAudioNotification() {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.35);
+      } catch(e) { console.log(e); }
+    }
+
+    // ===== نغمة رنين حقيقية ومتكررة لتنبيه متلقي المكالمة (بدل نغمة صامتة تقريباً) =====
+    function playRingBurst() {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const ringOnce = (startTime) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, startTime);
+          osc.frequency.setValueAtTime(480, startTime + 0.2);
+          gain.gain.setValueAtTime(0.0001, startTime);
+          gain.gain.exponentialRampToValueAtTime(0.22, startTime + 0.05);
+          gain.gain.setValueAtTime(0.22, startTime + 0.35);
+          gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.45);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(startTime);
+          osc.stop(startTime + 0.5);
+        };
+        // نمط "رن...رن" على شكل نبضتين متتاليتين يحاكي جرس الهاتف الحقيقي
+        ringOnce(audioCtx.currentTime);
+        ringOnce(audioCtx.currentTime + 0.55);
+        setTimeout(() => { try { audioCtx.close(); } catch(e) {} }, 1500);
+      } catch(e) { console.log(e); }
+    }
+
+    function startRingtone() {
+      stopRingtone();
+      playRingBurst();
+      ringtoneIntervalId = setInterval(playRingBurst, 2500);
+    }
+
+    function stopRingtone() {
+      if (ringtoneIntervalId) {
+        clearInterval(ringtoneIntervalId);
+        ringtoneIntervalId = null;
+      }
+    }
+
+    // ===== طلب صلاحية الميكروفون مرة واحدة فقط عند الدخول، بدل تكرار الطلب في كل مكالمة =====
+    async function primeMicrophonePermission() {
+      if (micPrimed) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        stream.getTracks().forEach(t => t.stop()); // نطفئ الميكروفون فوراً، الهدف فقط تثبيت صلاحية المتصفح مسبقاً
+        micPrimed = true;
+      } catch (e) {
+        // إذا رفض المستخدم الصلاحية هنا، سيُعاد طلبها بشكل طبيعي عند بدء أول مكالمة فعلية
+        console.log("primeMicrophonePermission:", e);
+      }
+    }
+
+    function showToastNotification(message) {
+      playAudioNotification();
+      const toast = document.createElement('div');
+      toast.className = 'toast-notification';
+      toast.innerHTML = `<i class="fa-solid fa-bell" style="color:var(--layer-warning);"></i> <span>${message}</span>`;
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.remove(); }, 4000);
+    }
+
+    function exportToExcel(tableId, fileName) {
+      const table = document.getElementById(tableId);
+      if (!table) return alert("⚠️ لم يتم العثور على الجدول!");
+      const wb = XLSX.utils.table_to_book(table, { sheet: "البيانات" });
+      XLSX.writeFile(wb, `${fileName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
+
+    function togglePasswordVisibility(inputId, iconElement) {
+      const input = document.getElementById(inputId);
+      input.type = (input.type === "password") ? "text" : "password";
+      iconElement.classList.toggle("fa-eye");
+      iconElement.classList.toggle("fa-eye-slash");
+    }
+
+    let evalLabelsAbbreviated = false;
+    function toggleEvalLabelsMode() {
+      evalLabelsAbbreviated = !evalLabelsAbbreviated;
+      document.querySelectorAll('.eval-metric-label').forEach(el => {
+        el.innerText = evalLabelsAbbreviated ? el.getAttribute('data-short') : el.getAttribute('data-full');
+      });
+      const toggleText = document.getElementById('evalLabelsToggleText');
+      if (toggleText) toggleText.innerText = evalLabelsAbbreviated ? "تسميات كاملة" : "تسميات مختصرة";
+    }
+
+    function showLoginCard() {
+      document.getElementById('reset-card').classList.add('hidden');
+      document.getElementById('change-pass-card').classList.add('hidden');
+      document.getElementById('login-card').classList.remove('hidden');
+    }
+
+    function showResetCard() {
+      document.getElementById('login-card').classList.add('hidden');
+      document.getElementById('reset-card').classList.remove('hidden');
+    }
+
+    function getRoleLabel(role) {
+      if (role === 'admin') return 'المشرف العام';
+      if (role === 'tech_admin') return 'المشرف التقني';
+      if (role === 'bs') return 'مشرف الأعمال';
+      return 'موظف خدمة عملاء';
+    }
+
+    function renderUserCellHtml(name, avatar) {
+      if (avatar && avatar.trim() !== '') {
+        return `<div class="user-cell-flex"><div class="table-avatar-circle"><img src="${avatar}"></div><span>${name}</span></div>`;
+      }
+      return `<div class="user-cell-flex"><div class="table-avatar-circle"><span>${name ? name.charAt(0) : 'U'}</span></div><span>${name}</span></div>`;
+    }
+
+    // ===== جلب صورة الموظف/المشرف الحية من فايربيز (system_users) بمعرّف المستخدم أو بالاسم =====
+    // يُستخدم في كل مكان يظهر فيه شخص (الدردشة، المكالمات، الطلبات، البهيفيرات، التقييمات)
+    // حتى تظهر دائماً أحدث صورة محفوظة له، بدلاً من الاعتماد على نسخة قديمة مخزّنة داخل كل سجل.
+    function getAvatarForUsername(usernameOrName) {
+      if (!usernameOrName) return '';
+      const key = usernameOrName.toString().trim().toLowerCase();
+      if (allLoadedUsersCache[key] && allLoadedUsersCache[key].avatar) {
+        return allLoadedUsersCache[key].avatar;
+      }
+      for (const k in allLoadedUsersCache) {
+        const u = allLoadedUsersCache[k];
+        if (!u || !u.avatar) continue;
+        const uUsername = (u.username || '').toString().trim().toLowerCase();
+        const uName = (u.name || '').toString().trim();
+        if (uUsername === key || uName === usernameOrName.toString().trim()) {
+          return u.avatar;
+        }
+      }
+      return '';
+    }
+
+    /* ===== تعديل ودعم تسجيل الدخول الموحد ===== */
+    async function login() {
+      const input = document.getElementById('login-input').value.trim().toLowerCase();
+      const pass = document.getElementById('password').value.trim();
+
+      if (!input || !pass) return alert("⚠️ يرجى ملء جميع الحقول المطلوبة!");
+
+      try {
+        let user = null;
+        if (window.db) {
+          const userRef = window.doc(window.db, "system_users", input);
+          const userSnap = await window.getDoc(userRef);
+          if (userSnap.exists()) user = userSnap.data();
+        }
+        if (!user) user = usersDB[input];
+
+        if (user && user.password === pass) {
+          currentLoginKey = input;
+          if (pass === "123") {
+            currentPendingUsername = input;
+            document.getElementById('login-card').classList.add('hidden');
+            document.getElementById('change-pass-card').classList.remove('hidden');
+          } else {
+            currentUser = user;
+            if (!currentUser.username) currentUser.username = input;
+            await setUserOnlineStatus(currentUser.username, true);
+            renderDashboard();
+          }
+        } else {
+          alert("⚠️ كلمة المرور أو اسم المستخدم غير صحيح!");
+        }
+      } catch (err) { alert("⚠️ خطأ في تسجيل الدخول: " + err.message); }
+    }
+
+    /* ===== تغيير كلمة المرور الإجبارية عند أول دخول ===== */
+    async function forceChangePassword() {
+      const newPass = document.getElementById('new-pass-input').value.trim();
+      const confirmPass = document.getElementById('confirm-pass-input').value.trim();
+
+      if (newPass === "123") return alert("⚠️ حدد كلمة مرور أكثر أماناً غير الافتراضية!");
+      if (newPass !== confirmPass) return alert("⚠️ كلمة المرور وتأكيدها غير متطابقين!");
+
+      try {
+        if (usersDB[currentPendingUsername]) {
+          usersDB[currentPendingUsername].password = newPass;
+        }
+        if (window.db) {
+          await window.setDoc(window.doc(window.db, "system_users", currentPendingUsername), { password: newPass }, { merge: true });
+          const userSnap = await window.getDoc(window.doc(window.db, "system_users", currentPendingUsername));
+          if (userSnap.exists()) currentUser = userSnap.data();
+        } else {
+          currentUser = usersDB[currentPendingUsername];
+        }
+        if (!currentUser.username) currentUser.username = currentPendingUsername;
+
+        await setUserOnlineStatus(currentUser.username, true);
+        alert("✅ تم حفظ كلمة المرور الجديدة!");
+        document.getElementById('change-pass-card').classList.add('hidden');
+        renderDashboard();
+      } catch (err) { alert("⚠️ خطأ: " + err.message); }
+    }
+
+    /* ===== استعادة كلمة المرور الافتراضية ===== */
+    async function resetPassword() {
+      const input = document.getElementById('reset-username-input').value.trim().toLowerCase();
+      try {
+        if (window.db) {
+          await window.setDoc(window.doc(window.db, "system_users", input), { password: "123" }, { merge: true });
+        }
+        alert(`✅ تم إرجاع كلمة مرور الحساب إلى 123 بنجاح`);
+        showLoginCard();
+      } catch (err) { alert("⚠️ خطأ: " + err.message); }
+    }
+
+    function openAccountSettingsModal() {
+      newAvatarBase64 = null;
+      document.getElementById('settings-avatar-name').innerText = currentUser.avatar ? "تم تعيين صورة مسبقاً" : "لم يتم اختيار صورة بعد";
+      document.getElementById('settings-pass-input').value = '';
+      document.getElementById('accountSettingsModal').classList.remove('hidden');
+    }
+
+    function closeAccountSettingsModal() {
+      document.getElementById('accountSettingsModal').classList.add('hidden');
+    }
+
+    function handleAvatarFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const maxSize = 300 * 1024;
+      if (file.size > maxSize) {
+        alert("⚠️ حجم الصورة أكبر من 300 كيلوبايت! يرجى اختيار صورة أصغر حجماً.");
+        event.target.value = '';
+        return;
+      }
+
+      document.getElementById('settings-avatar-name').innerText = file.name;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        newAvatarBase64 = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function updateAccountSettings() {
+      const newPass = document.getElementById('settings-pass-input').value.trim();
+      const updateData = {};
+
+      if (newAvatarBase64 !== null) {
+        updateData.avatar = newAvatarBase64;
+        currentUser.avatar = newAvatarBase64;
+      }
+
+      if (newPass !== '') {
+        if (newPass.length < 4) return alert("⚠️ كلمة المرور يجب ألا تقل عن 4 رموز!");
+        updateData.password = newPass;
+        currentUser.password = newPass;
+      }
+
+      try {
+        if (window.db && currentUser.username) {
+          await window.setDoc(window.doc(window.db, "system_users", currentUser.username), updateData, { merge: true });
+        }
+        updateUserHeaderDisplay();
+        showToastNotification("✅ تم تحديث إعدادات الحساب بنجاح!");
+        closeAccountSettingsModal();
+      } catch (err) {
+        alert("⚠️ خطأ أثناء التحديث: " + err.message);
+      }
+    }
+    
+
+    function renderDashboard() {
+      document.getElementById('login-card').classList.add('hidden');
+      document.getElementById('dashboard-header').classList.remove('hidden');
+      document.getElementById('chatWidgetBtn').classList.remove('hidden');
+
+      if (currentUser.role !== 'employee' && currentUser.role !== 'tech_admin') {
+        document.getElementById('clearChatBtn').classList.remove('hidden');
+      } else {
+        document.getElementById('clearChatBtn').classList.add('hidden');
+      }
+
+      updateUserHeaderDisplay();
+      setupHeaderButtonsForRole();
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.add('hidden'));
+
+      listenToReportsLive();
+      listenToUsersPresence();
+      listenToAllBehaviorsLive();
+      listenToChatGlobalNotifications();
+      listenForIncomingCalls();
+      syncCallStatusField(currentUser.username, { isOnline: true, inCall: false });
+      primeMicrophonePermission();
+
+      if (currentUser.role === 'employee') {
+        document.getElementById('panel-employee').classList.remove('hidden');
+        document.getElementById('emp-uid-display').innerText = currentUser.uid;
+        listenToSingleEmployeeLive(currentUser.name);
+      } 
+      else if (currentUser.role === 'tech_admin') {
+        document.getElementById('panel-tech-admin').classList.remove('hidden');
+      } 
+      else if (currentUser.role === 'bs') {
+        document.getElementById('panel-bs').classList.remove('hidden');
+        listenToAllEvaluationsLive('bs-evaluations-table');
+      } 
+      else if (currentUser.role === 'admin') {
+        document.getElementById('panel-admin').classList.remove('hidden');
+        listenToAllEvaluationsLive('admin-evaluations-table');
+        listenToAllReportsForGeneralAdmin();
+      }
+    }
+
+    function updateUserHeaderDisplay() {
+      document.getElementById('user-display-name').innerText = currentUser.name;
+      document.getElementById('user-display-role').innerText = getRoleLabel(currentUser.role);
+      
+      const avatarDisplay = document.getElementById('avatarDisplay');
+      if (currentUser.avatar && currentUser.avatar.trim() !== '') {
+        avatarDisplay.innerHTML = `<img src="${currentUser.avatar}" alt="Avatar">`;
+      } else {
+        avatarDisplay.innerHTML = `<span id="avatarInitial">${currentUser.name ? currentUser.name.charAt(0) : 'U'}</span>`;
+      }
+    }
+
+    function setupHeaderButtonsForRole() {
+      const actionContainer = document.getElementById('header-action-buttons');
+      
+      const accountSettingsBtn = `
+        <button class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.78rem; background:linear-gradient(135deg, var(--layer-primary), var(--layer-secondary));" onclick="openAccountSettingsModal()">
+          <i class="fa-solid fa-user-gear"></i> الإعدادات
+        </button>
+      `;
+
+      const breakModeBtn = isPrivilegedCallRole(currentUser.role) ? renderBreakButtonHtml() : '';
+
+      if (currentUser.role === 'employee' || currentUser.role === 'tech_admin') {
+        const issuesBadgeHtml = newIssuesCount > 0 ? `<span id="btn-issues-badge" class="btn-counter-badge">${newIssuesCount}</span>` : `<span id="btn-issues-badge" class="btn-counter-badge hidden">0</span>`;
+        const behaviorsBadgeHtml = newBehaviorsCount > 0 ? `<span id="btn-behaviors-badge" class="btn-counter-badge">${newBehaviorsCount}</span>` : `<span id="btn-behaviors-badge" class="btn-counter-badge hidden">0</span>`;
+
+        let extraEmployeeButtons = '';
+        if (currentUser.role === 'employee') {
+          extraEmployeeButtons = `
+            <button class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.78rem;" onclick="openMyIssuesModal()">
+              <i class="fa-solid fa-triangle-exclamation" style="color:var(--layer-secondary);"></i> المشكلات
+              ${issuesBadgeHtml}
+            </button>
+            <button class="btn btn-success" style="width:auto; padding:6px 12px; font-size:0.78rem;" onclick="openSendRequestModal()">
+              <i class="fa-solid fa-paper-plane" style="color:white;"></i> الطلبات
+            </button>
+          `;
+        }
+
+        actionContainer.innerHTML = `
+          <div class="status-indicator"><span class="pulse-dot"></span> متصل</div>
+          
+          ${accountSettingsBtn}
+          ${breakModeBtn}
+          ${extraEmployeeButtons}
+
+          <button class="btn btn-warning" style="width:auto; padding:6px 12px; font-size:0.78rem;" onclick="openBehaviorsModal()">
+            <i class="fa-solid fa-shield-halved" style="color:white;"></i> البهيفيرات
+            ${behaviorsBadgeHtml}
+          </button>
+
+          <button class="btn btn-logout" onclick="logout()">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i> خروج
+          </button>
+        `;
+      } else {
+        const reqBadgeHtml = newRequestsCount > 0 ? `<span id="btn-reqs-badge" class="btn-counter-badge">${newRequestsCount}</span>` : `<span id="btn-reqs-badge" class="btn-counter-badge hidden">0</span>`;
+        const behaviorsBadgeHtml = newBehaviorsCount > 0 ? `<span id="btn-behaviors-badge" class="btn-counter-badge">${newBehaviorsCount}</span>` : `<span id="btn-behaviors-badge" class="btn-counter-badge hidden">0</span>`;
+
+        actionContainer.innerHTML = `
+          <div class="status-indicator"><span class="pulse-dot"></span> مشرف</div>
+
+          ${accountSettingsBtn}
+          ${breakModeBtn}
+
+          <button class="btn btn-warning" style="width:auto; padding:6px 12px; font-size:0.78rem;" onclick="openEvaluationsArchiveModal()">
+            <i class="fa-solid fa-box-archive" style="color:white;"></i> الأرشيف
+          </button>
+
+          <button class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.78rem;" onclick="openAdminRequestsModal()">
+            <i class="fa-solid fa-list-check" style="color:var(--layer-secondary);"></i> الطلبات
+            ${reqBadgeHtml}
+          </button>
+
+          <button class="btn btn-warning" style="width:auto; padding:6px 12px; font-size:0.78rem;" onclick="openBehaviorsModal()">
+            <i class="fa-solid fa-shield-halved" style="color:white;"></i> البهيفيرات
+            ${behaviorsBadgeHtml}
+          </button>
+
+          <button class="btn btn-accent" style="width:auto; padding:6px 12px; font-size:0.78rem;" onclick="openSendBehaviorModal()">
+            <i class="fa-solid fa-bullhorn" style="color:white;"></i> تحذير
+          </button>
+
+          <button class="btn btn-logout" onclick="logout()">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i> خروج
+          </button>
+        `;
+        listenToAllCustomRequestsForAdmin();
+      }
+    }
+
+    /* ------------------------------------------------------------
+       زر "أخذ استراحة" — يظهر حصرياً للمشرفين/قادة الفرق/التقنيين
+       ------------------------------------------------------------ */
+    function renderBreakButtonHtml() {
+      const me = allLoadedUsersCache[currentUser.username] || {};
+      const onBreak = !!me.isOnBreak;
+      return `
+        <button id="breakModeBtn" class="btn ${onBreak ? 'btn-warning' : 'btn-secondary'}" style="width:auto; padding:6px 12px; font-size:0.78rem;" onclick="toggleBreakMode()">
+          <i class="fa-solid fa-mug-hot"></i> ${onBreak ? 'إنهاء الاستراحة' : 'أخذ استراحة'}
+        </button>
+      `;
+    }
+
+    function refreshBreakButtonUI() {
+      if (!currentUser || !isPrivilegedCallRole(currentUser.role)) return;
+      const btn = document.getElementById('breakModeBtn');
+      if (!btn) return;
+      const me = allLoadedUsersCache[currentUser.username] || {};
+      const onBreak = !!me.isOnBreak;
+      btn.className = `btn ${onBreak ? 'btn-warning' : 'btn-secondary'}`;
+      btn.innerHTML = `<i class="fa-solid fa-mug-hot"></i> ${onBreak ? 'إنهاء الاستراحة' : 'أخذ استراحة'}`;
+    }
+
+    async function toggleBreakMode() {
+      if (!currentUser || !isPrivilegedCallRole(currentUser.role)) return;
+      const me = allLoadedUsersCache[currentUser.username] || {};
+      if (me.inCall) {
+        showToastNotification("⚠️ لا يمكن تفعيل وضع الاستراحة أثناء وجودك في مكالمة جارية");
+        return;
+      }
+      const newBreakState = !me.isOnBreak;
+      await syncCallStatusField(currentUser.username, { isOnBreak: newBreakState });
+      showToastNotification(newBreakState ? "☕ تم تفعيل وضع الاستراحة، لن يتمكن الموظفون من الاتصال بك" : "✅ تم إنهاء وضع الاستراحة، أنت متاح الآن");
+    }
+
+    function openMyIssuesModal() {
+      newIssuesCount = 0;
+      updateBadgeElement('btn-issues-badge', 0);
+      document.getElementById('myIssuesModal').classList.remove('hidden');
+      loadEmployeeIssues();
+    }
+    function closeMyIssuesModal() {
+      document.getElementById('myIssuesModal').classList.add('hidden');
+    }
+
+    async function loadEmployeeIssues() {
+      const tbody = document.getElementById('my-issues-table-body');
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">جاري جلب بلاغاتك...</td></tr>';
+      try {
+        if (window.db) {
+          const q = window.query(window.collection(window.db, "reports"), window.where("employeeName", "==", currentUser.name));
+          const snap = await window.getDocs(q);
+          tbody.innerHTML = '';
+          if (snap.empty) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">لم تقم بإرفاق أي مشكلات أو تعليقات بعد.</td></tr>';
+            return;
+          }
+          snap.forEach(docSnap => {
+            const data = docSnap.data();
+            const docId = docSnap.id;
+            tbody.innerHTML += `
+              <tr>
+                <td><span class="badge badge-tech">${data.category}</span></td>
+                <td>${data.comment}</td>
+                <td>${data.time}</td>
+                <td>
+                  <button class="btn btn-accent" style="width:auto; padding:4px 8px; font-size:0.7rem;" onclick="deleteMyReport('${docId}')">حذف</button>
+                </td>
+              </tr>
+            `;
+          });
+        }
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">خطأ في تحميل البيانات.</td></tr>';
+      }
+    }
+
+    async function deleteMyReport(id) {
+      if (confirm("هل أنت متأكد من حذف هذا البلاغ؟")) {
+        try {
+          if (window.db) {
+            await window.deleteDoc(window.doc(window.db, "reports", id));
+          }
+          showToastNotification("🗑️ تم حذف البلاغ بنجاح");
+          loadEmployeeIssues();
+        } catch(e) { alert("خطأ: " + e.message); }
+      }
+    }
+
+    function openSendRequestModal() {
+      document.getElementById('req-name').value = currentUser.name || '';
+      document.getElementById('req-id').value = currentUser.uid || '';
+      document.getElementById('req-national-id').value = '';
+      document.getElementById('sendRequestModal').classList.remove('hidden');
+    }
+    function closeSendRequestModal() {
+      document.getElementById('sendRequestModal').classList.add('hidden');
+    }
+
+    async function submitCustomRequest() {
+      const name = document.getElementById('req-name').value.trim();
+      const id = document.getElementById('req-id').value.trim();
+      const nationalId = document.getElementById('req-national-id').value.trim();
+      const status = document.getElementById('req-status').value;
+
+      if (!name || !id || !nationalId) return alert("⚠️ يرجى تعبئة كافة الحقول!");
+
+      const requestObj = {
+        senderEmployeeName: currentUser.name,
+        senderUsername: currentUser.username,
+        name: name,
+        empId: id,
+        nationalId: nationalId,
+        status: status,
+        createdAt: new Date().getTime(),
+        time: new Date().toLocaleString('ar-EG')
+      };
+
+      try {
+        if (window.db) {
+          await window.addDoc(window.collection(window.db, "custom_employee_requests"), requestObj);
+        }
+        showToastNotification("🚀 تم إرسال الطلب بنجاح!");
+        closeSendRequestModal();
+      } catch (e) {
+        alert("⚠️ خطأ في إرسال الطلب: " + e.message);
+      }
+    }
+
+    function openBehaviorsModal() {
+      newBehaviorsCount = 0;
+      updateBadgeElement('btn-behaviors-badge', 0);
+      document.getElementById('behaviorsModal').classList.remove('hidden');
+    }
+    function closeBehaviorsModal() {
+      document.getElementById('behaviorsModal').classList.add('hidden');
+    }
+
+    async function downloadBehaviorAsImage(docId) {
+      if (currentUser.role === 'employee' || currentUser.role === 'tech_admin') {
+        return alert("⚠️ هذه الميزة متاحة للمشرفين فقط.");
+      }
+      const targetElement = document.getElementById(`behavior-card-${docId}`);
+      if (!targetElement) return alert("⚠️ عنصر البهيفير غير موجود!");
+
+      try {
+        const canvas = await html2canvas(targetElement, { backgroundColor: '#0f172a', scale: 2 });
+        const image = canvas.toDataURL("image/png");
+        const a = document.createElement('a');
+        a.href = image;
+        a.download = `behavior_record_${docId}.png`;
+        a.click();
+        showToastNotification("📸 تم تنزيل البهيفير كصورة بنجاح");
+      } catch(e) {
+        alert("⚠️ خطأ أثناء تصوير العنصر: " + e.message);
+      }
+    }
+
+    function listenToAllBehaviorsLive() {
+      if (!window.db) return;
+      if (unsubscribeBehaviors) unsubscribeBehaviors();
+
+      const q = window.query(window.collection(window.db, "employee_behaviors"), window.orderBy("createdAt", "desc"));
+      unsubscribeBehaviors = window.onSnapshot(q, (snapshot) => {
+        const tbody = document.getElementById('behaviors-table-body');
+        if (tbody) tbody.innerHTML = '';
+        
+        let foundAny = false;
+        let unreadBehaviors = 0;
+        const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+        const nowTime = new Date().getTime();
+
+        if (snapshot.empty) {
+          if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">لا توجد تحذيرات أو بهيفيرات مسجلة حالياً.</td></tr>';
+        } else {
+          snapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            const docId = docSnap.id;
+            
+            const isSelfRole = (currentUser.role === 'employee' || currentUser.role === 'tech_admin');
+            let isTargetEmployee = false;
+            if (isSelfRole) {
+              if (data.targetUsername) {
+                isTargetEmployee = data.targetUsername === currentUser.username;
+              } else {
+                isTargetEmployee = !!((data.targetBadge && data.targetBadge === currentUser.badge) || (data.targetName && data.targetName === currentUser.name));
+              }
+            }
+            const isSupervisor = currentUser.role !== 'employee' && currentUser.role !== 'tech_admin';
+            const isCreatorSupervisor = isSupervisor && data.supervisorUsername === currentUser.username;
+
+            if (isTargetEmployee || isSupervisor) {
+              foundAny = true;
+              unreadBehaviors++;
+
+              let repliesHtml = `<div style="margin-bottom:6px; font-size:0.8rem;">${data.comment}</div>`;
+              if (data.replies && data.replies.length > 0) {
+                repliesHtml += `<div style="background:rgba(255,255,255,0.04); padding:6px; border-radius:6px; margin-top:4px;">`;
+                data.replies.forEach(rep => {
+                  repliesHtml += `<div style="font-size:0.75rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:3px; margin-bottom:3px;">
+                    <strong style="color:var(--layer-secondary);">${rep.senderName}:</strong> ${rep.text} <span style="font-size:0.65rem; color:var(--text-sub);">(${rep.time})</span>
+                  </div>`;
+                });
+                repliesHtml += `</div>`;
+              }
+
+              const isExpired = (nowTime - data.createdAt) > THREE_DAYS_MS;
+              const canComment = (isCreatorSupervisor || isTargetEmployee) && !isExpired;
+              
+              if (canComment) {
+                repliesHtml += `
+                  <div style="display:flex; gap:6px; margin-top:6px;">
+                    <input type="text" id="reply-input-${docId}" class="form-input" placeholder="اكتب ردك..." style="padding:6px 10px; font-size:0.75rem;" onkeypress="if(event.key==='Enter') submitBehaviorReply('${docId}')">
+                    <button class="btn btn-primary" style="width:auto; padding:6px 10px; font-size:0.7rem;" onclick="submitBehaviorReply('${docId}')">رد</button>
+                  </div>
+                `;
+              } else if (isExpired) {
+                repliesHtml += `<div style="font-size:0.7rem; color:var(--layer-accent); margin-top:4px;">🔒 تم قفل الرد (تجاوز 3 أيام).</div>`;
+              } else if (isSupervisor && !isCreatorSupervisor) {
+                repliesHtml += `<div style="font-size:0.7rem; color:var(--text-sub); margin-top:4px;">🔒 الرد مخصص فقط للمشرف المنشئ والموظف.</div>`;
+              }
+
+              let deleteBtnHtml = '';
+              let downloadImgBtn = '';
+
+              if (isSupervisor) {
+                deleteBtnHtml = `<button class="btn btn-accent" style="width:auto; padding:4px 8px; font-size:0.65rem; margin-top:4px;" onclick="deleteBehaviorRecord('${docId}')">حذف</button>`;
+                downloadImgBtn = `<button class="btn btn-secondary" style="width:auto; padding:4px 8px; font-size:0.65rem; margin-top:4px; margin-right:4px;" onclick="downloadBehaviorAsImage('${docId}')">صورة</button>`;
+              }
+
+              if (tbody) {
+                tbody.innerHTML += `
+                  <tr id="behavior-card-${docId}">
+                    <td>${renderUserCellHtml(data.supervisorName || 'مشرف', getAvatarForUsername(data.supervisorUsername || data.supervisorName))}</td>
+                    <td>${renderUserCellHtml(`${data.targetName} (${data.targetBadge})`, getAvatarForUsername(data.targetUsername || data.targetName))}</td>
+                    <td><span class="badge badge-vpn">${data.type}</span></td>
+                    <td>${repliesHtml}</td>
+                    <td>${data.time}<br>${deleteBtnHtml} ${downloadImgBtn}</td>
+                  </tr>
+                `;
+              }
+            }
+          });
+          
+          if (!foundAny && tbody && (currentUser.role === 'employee' || currentUser.role === 'tech_admin')) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">لا توجد تحذيرات أو بهيفيرات مسجلة بحسابك.</td></tr>';
+          }
+        }
+
+        if (document.getElementById('behaviorsModal').classList.contains('hidden') && unreadBehaviors > 0) {
+          newBehaviorsCount = unreadBehaviors;
+          updateBadgeElement('btn-behaviors-badge', newBehaviorsCount);
+        }
+      });
+    }
+
+    async function submitBehaviorReply(docId) {
+      const input = document.getElementById(`reply-input-${docId}`);
+      if (!input) return;
+      const text = input.value.trim();
+      if (!text) return alert("⚠️ اكتب نص الرد أولاً!");
+
+      const newReply = {
+        senderName: currentUser.name,
+        text: text,
+        time: new Date().toLocaleString('ar-EG')
+      };
+
+      try {
+        if (window.db) {
+          const docRef = window.doc(window.db, "employee_behaviors", docId);
+          const docSnap = await window.getDoc(docRef);
+          if (docSnap.exists()) {
+            const currentReplies = docSnap.data().replies || [];
+            currentReplies.push(newReply);
+            await window.updateDoc(docRef, { replies: currentReplies });
+          }
+        }
+        input.value = '';
+        showToastNotification("💬 تم إرسال الرد بنجاح!");
+      } catch(e) { alert("خطأ: " + e.message); }
+    }
+
+    async function deleteBehaviorRecord(id) {
+      if (confirm("هل أنت متأكد من حذف هذا السجل؟")) {
+        try {
+          if (window.db) await window.deleteDoc(window.doc(window.db, "employee_behaviors", id));
+          showToastNotification("🗑️ تم حذف السجل بنجاح");
+        } catch(e) { alert("خطأ: " + e.message); }
+      }
+    }
+
+    function openSendBehaviorModal() {
+      document.getElementById('sendBehaviorModal').classList.remove('hidden');
+      loadEmployeesIntoSelect();
+    }
+    function closeSendBehaviorModal() {
+      document.getElementById('sendBehaviorModal').classList.add('hidden');
+    }
+
+    async function loadEmployeesIntoSelect() {
+      const select = document.getElementById('bh-target-select');
+      select.innerHTML = '<option value="" disabled selected>جاري تحميل قائمة الموظفين...</option>';
+      try {
+        let optionsHtml = '<option value="" disabled selected>اختر الموظف المستهدف...</option>';
+        if (window.db) {
+          const snap = await window.getDocs(window.collection(window.db, "system_users"));
+          snap.forEach(docSnap => {
+            const d = docSnap.data();
+            if (d.role === 'employee') {
+              optionsHtml += `<option value="${d.username}|${d.name}|${d.badge || ''}">${d.name} (${d.badge || d.username})</option>`;
+            }
+          });
+        }
+        select.innerHTML = optionsHtml;
+      } catch(e) {
+        select.innerHTML = '<option value="">خطأ في التحميل</option>';
+      }
+    }
+
+    async function submitBehaviorToEmployee() {
+      const selectVal = document.getElementById('bh-target-select').value;
+      const type = document.getElementById('bh-type').value;
+      const comment = document.getElementById('bh-comment').value.trim();
+
+      if (!selectVal || !type || !comment) return alert("⚠️ يرجى تعبئة كافة الحقول!");
+
+      const [targetUsername, targetName, targetBadge] = selectVal.split('|');
+
+      const behaviorObj = {
+        supervisorUsername: currentUser.username,
+        supervisorName: currentUser.name,
+        targetUsername: targetUsername,
+        targetName: targetName,
+        targetBadge: targetBadge,
+        type: type,
+        comment: comment,
+        replies: [],
+        createdAt: new Date().getTime(),
+        time: new Date().toLocaleString('ar-EG')
+      };
+
+      try {
+        if (window.db) {
+          await window.addDoc(window.collection(window.db, "employee_behaviors"), behaviorObj);
+        }
+        showToastNotification("🚀 تم إرسال البهيفير / التحذير للموظف بنجاح!");
+        closeSendBehaviorModal();
+        document.getElementById('bh-comment').value = '';
+      } catch(e) {
+        alert("⚠️ خطأ في الإرسال: " + e.message);
+      }
+    }
+
+    function openAdminRequestsModal() {
+      newRequestsCount = 0;
+      updateBadgeElement('btn-reqs-badge', 0);
+      document.getElementById('adminRequestsModal').classList.remove('hidden');
+    }
+    function closeAdminRequestsModal() {
+      document.getElementById('adminRequestsModal').classList.add('hidden');
+    }
+
+    function listenToAllCustomRequestsForAdmin() {
+      if (!window.db) return;
+      if (unsubscribeCustomRequests) unsubscribeCustomRequests();
+
+      unsubscribeCustomRequests = window.onSnapshot(window.query(window.collection(window.db, "custom_employee_requests"), window.orderBy("createdAt", "desc")), (snap) => {
+        const tbody = document.getElementById('all-requests-table-body');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        
+        let count = 0;
+        if (snap.empty) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">لا توجد طلبات جديدة حالياً.</td></tr>';
+        } else {
+          snap.forEach(docSnap => {
+            const data = docSnap.data();
+            const docId = docSnap.id;
+            count++;
+            tbody.innerHTML += `
+              <tr>
+                <td>${renderUserCellHtml(data.senderEmployeeName, getAvatarForUsername(data.senderUsername || data.senderEmployeeName))}</td>
+                <td><strong>${data.name}</strong></td>
+                <td><span style="color:var(--layer-secondary);">${data.empId}</span></td>
+                <td>${data.nationalId}</td>
+                <td><span class="badge badge-admin">${data.status}</span></td>
+                <td>${data.time}</td>
+                <td>
+                  <button class="btn btn-accent" style="width:auto; padding:4px 8px; font-size:0.7rem;" onclick="deleteCustomRequest('${docId}')">حذف</button>
+                </td>
+              </tr>
+            `;
+          });
+        }
+        if (document.getElementById('adminRequestsModal').classList.contains('hidden') && count > newRequestsCount) {
+          newRequestsCount = count;
+          updateBadgeElement('btn-reqs-badge', newRequestsCount);
+        }
+      });
+    }
+
+    async function deleteCustomRequest(id) {
+      if (confirm("هل أنت متأكد من حذف هذا الطلب؟")) {
+        try {
+          if (window.db) await window.deleteDoc(window.doc(window.db, "custom_employee_requests", id));
+          showToastNotification("🗑️ تم حذف الطلب بنجاح");
+        } catch(e) { alert("خطأ: " + e.message); }
+      }
+    }
+
+    function openEvaluationsArchiveModal() {
+      document.getElementById('evaluationsArchiveModal').classList.remove('hidden');
+      loadEvaluationsArchive();
+    }
+    function closeEvaluationsArchiveModal() {
+      document.getElementById('evaluationsArchiveModal').classList.add('hidden');
+    }
+
+    async function loadEvaluationsArchive() {
+      const tbody = document.getElementById('archive-table-body');
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">جاري جلب سجل الأرشيف...</td></tr>';
+      try {
+        if (window.db) {
+          const q = window.query(window.collection(window.db, "evaluations_archive"), window.orderBy("archivedAt", "desc"));
+          const snap = await window.getDocs(q);
+          tbody.innerHTML = '';
+          if (snap.empty) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">الأرشيف فارغ حالياً.</td></tr>';
+            return;
+          }
+          snap.forEach(docSnap => {
+            const data = docSnap.data();
+            const docId = docSnap.id;
+            const displayName = data.name || '-';
+            const displayScore = (data.score !== undefined && data.score !== null && data.score !== '') ? data.score : '-';
+            tbody.innerHTML += `
+              <tr>
+                <td>${displayName}</td>
+                <td>${data.badge || '-'}</td>
+                <td><strong style="color:var(--layer-warning);">${displayScore}</strong></td>
+                <td>${data.notes || '-'}</td>
+                <td>
+                  ${data.time || '-'}
+                  <button class="btn btn-accent" style="width:auto; padding:2px 6px; font-size:0.65rem; margin-right:6px;" onclick="deleteSingleArchiveItem('${docId}')">حذف</button>
+                </td>
+              </tr>
+            `;
+          });
+        }
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">خطأ في جلب بيانات الأرشيف.</td></tr>';
+      }
+    }
+
+    // ===== الوظيفة الجديدة: حذف عنصر واحد من الأرشيف =====
+    async function deleteSingleArchiveItem(docId) {
+      if (confirm("هل أنت متأكد من حذف سجل التقييم هذا من الأرشيف؟")) {
+        try {
+          if (window.db) {
+            await window.deleteDoc(window.doc(window.db, "evaluations_archive", docId));
+          }
+          showToastNotification("🗑️ تم حذف سجل الأرشيف بنجاح");
+          loadEvaluationsArchive();
+        } catch(e) {
+          alert("⚠️ خطأ أثناء الحذف: " + e.message);
+        }
+      }
+    }
+
+    // ===== الوظيفة الجديدة: حذف جميع التقييمات السابقة في الأرشيف =====
+    async function clearAllArchiveEvaluations() {
+      if (confirm("⚠️ تحذير: هل أنت متأكد تماماً من رغبتك في حذف **جميع** سجلات أرشيف التقييمات السابقة نهائياً؟")) {
+        try {
+          if (window.db) {
+            const snap = await window.getDocs(window.collection(window.db, "evaluations_archive"));
+            const deletePromises = [];
+            snap.forEach(docSnap => {
+              deletePromises.push(window.deleteDoc(window.doc(window.db, "evaluations_archive", docSnap.id)));
+            });
+            await Promise.all(deletePromises);
+          }
+          showToastNotification("🗑️ تم مسح أرشيف التقييمات السابقة بالكامل بنجاح!");
+          loadEvaluationsArchive();
+        } catch(e) {
+          alert("⚠️ خطأ أثناء مسح الأرشيف: " + e.message);
+        }
+      }
+    }
+
+    function openEmployeeArchiveModal() {
+      document.getElementById('employeeArchiveModal').classList.remove('hidden');
+      loadEmployeePersonalArchive();
+    }
+    function closeEmployeeArchiveModal() {
+      document.getElementById('employeeArchiveModal').classList.add('hidden');
+    }
+
+    async function loadEmployeePersonalArchive() {
+      const tbody = document.getElementById('employee-archive-table-body');
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">جاري جلب سجل تقييماتك السابقة...</td></tr>';
+      try {
+        if (window.db) {
+          // 1) نحاول أولاً المطابقة الموثوقة عبر اسم المستخدم (للسجلات الحديثة)
+          let snap = await window.getDocs(window.query(window.collection(window.db, "evaluations_archive"), window.where("username", "==", currentUser.username)));
+          // 2) توافقاً مع السجلات القديمة التي لا تحتوي على username: نطابق بالاسم كخطة بديلة
+          if (snap.empty) {
+            snap = await window.getDocs(window.query(window.collection(window.db, "evaluations_archive"), window.where("name", "==", currentUser.name)));
+          }
+          tbody.innerHTML = '';
+          if (snap.empty) {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">لا توجد تقييمات سابقة مسجلة باسمك في الأرشيف.</td></tr>';
+            return;
+          }
+          snap.forEach(docSnap => {
+            const data = docSnap.data();
+            const displayScore = (data.score !== undefined && data.score !== null && data.score !== '') ? data.score : '-';
+            tbody.innerHTML += `
+              <tr>
+                <td><strong style="color:var(--layer-warning);">${displayScore}</strong></td>
+                <td>${data.notes || '-'}</td>
+                <td>${data.time || '-'}</td>
+              </tr>
+            `;
+          });
+        }
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">خطأ في جلب السجل.</td></tr>';
+      }
+    }
+
+    function handleFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      document.getElementById('file-name-label').innerText = file.name;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        selectedExcelData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    async function uploadDataToFirebase() {
+      if (!selectedExcelData || selectedExcelData.length === 0) {
+        return alert("⚠️ يرجى اختيار ملف Excel صالح أولاً!");
+      }
+
+      try {
+        if (window.db) {
+          const existingEvalSnap = await window.getDocs(window.collection(window.db, "evaluations"));
+          const archiveBatch = [];
+          existingEvalSnap.forEach(docSnap => {
+            const d = docSnap.data();
+            archiveBatch.push(window.addDoc(window.collection(window.db, "evaluations_archive"), {
+              name: d.name || '',
+              username: d.username || docSnap.id || '',
+              badge: d.badge || '',
+              score: d.score || '',
+              notes: d.notes || '',
+              qualityCalls: d.qualityCalls || '',
+              holdTime: d.holdTime || '',
+              onQueue: d.onQueue || '',
+              handlingTime: d.handlingTime || '',
+              answered: d.answered || '',
+              knowledgeLevel: d.knowledgeLevel || '',
+              archivedAt: new Date().getTime(),
+              time: new Date().toLocaleString('ar-EG')
+            }));
+          });
+          await Promise.all(archiveBatch);
+
+          const clearBatch = [];
+          existingEvalSnap.forEach(docSnap => {
+            clearBatch.push(window.deleteDoc(window.doc(window.db, "evaluations", docSnap.id)));
+          });
+          await Promise.all(clearBatch);
+
+          // دالة مساعدة لتنظيف قيمة الخلية مع قيمة افتراضية عند الفراغ
+          const cell = (v, fallback) => (v !== undefined && v !== null && String(v).trim() !== '') ? String(v).trim() : fallback;
+
+          // ===== اكتشاف تلقائي لأعمدة مقاييس التقييم (Quality Calls, Hold Time...) من صف العناوين =====
+          // هذا يسمح بقراءة الأعمدة الإضافية التي يرفعها المشرف مهما كان ترتيبها في الملف،
+          // مع الحفاظ على نفس الأعمدة الافتراضية (الاسم، اسم المستخدم، الدرجة...) دون أي تغيير.
+          const headerRow = (selectedExcelData[0] || []).map(h => String(h || '').trim().toLowerCase());
+          const findCol = (keywords, fallbackIndex, excludeIdx) => {
+            for (let idx = 0; idx < headerRow.length; idx++) {
+              if (excludeIdx !== undefined && idx === excludeIdx) continue;
+              const h = headerRow[idx];
+              if (h && keywords.some(k => h.includes(k))) return idx;
+            }
+            return fallbackIndex;
+          };
+          const colQuality = findCol(['quality'], 5);
+          const colHold = findCol(['hold'], 6);
+          const colQueue = findCol(['queue'], 7);
+          const colHandling = findCol(['handling', 'handle'], 8);
+          const colAnswered = findCol(['answer'], 9);
+          const colKnowledge = findCol(['knowledge'], 10);
+
+          const uploadBatch = [];
+          for (let i = 1; i < selectedExcelData.length; i++) {
+            const row = selectedExcelData[i];
+            if (!row || row.length === 0) continue;
+
+            const name = cell(row[0], `موظف ${i}`);
+            // توحيد اسم المستخدم دائماً بحروف صغيرة وبدون مسافات زائدة، حتى يرتبط تلقائياً
+            // ودائماً بنفس حساب الموظف الحقيقي الموجود مسبقاً (نفس معرّف المستند في system_users)
+            const username = cell(row[1], `emp${i}`).toLowerCase();
+            const score = cell(row[2], "0");
+            const notes = cell(row[3], "لا توجد ملاحظات");
+            const badge = cell(row[4], `EMP-${i}`);
+
+            // ===== مقاييس التقييم الشهري الفعلية القادمة من ملف المشرف =====
+            const qualityCalls = cell(row[colQuality], '');
+            const holdTime = cell(row[colHold], '');
+            const onQueue = cell(row[colQueue], '');
+            const handlingTime = cell(row[colHandling], '');
+            const answered = cell(row[colAnswered], '');
+            const knowledgeLevel = cell(row[colKnowledge], '');
+
+            uploadBatch.push(window.setDoc(window.doc(window.db, "evaluations", username), {
+              name: name,
+              username: username,
+              score: score,
+              notes: notes,
+              badge: badge,
+              qualityCalls: qualityCalls,
+              holdTime: holdTime,
+              onQueue: onQueue,
+              handlingTime: handlingTime,
+              answered: answered,
+              knowledgeLevel: knowledgeLevel,
+              updatedAt: new Date().getTime(),
+              time: new Date().toLocaleString('ar-EG')
+            }));
+
+            // نربط التقييم بحساب الموظف الحقيقي فقط. إن كان الحساب موجوداً مسبقاً
+            // لا نلمس كلمة مروره أو دوره أو أي بيانات أخرى خاصة به (نُحدّث الاسم والشارة فقط).
+            const userRef = window.doc(window.db, "system_users", username);
+            const userSnap = await window.getDoc(userRef);
+            if (userSnap.exists()) {
+              uploadBatch.push(window.setDoc(userRef, { username: username, name: name, badge: badge }, { merge: true }));
+            } else {
+              uploadBatch.push(window.setDoc(userRef, {
+                username: username,
+                name: name,
+                role: "employee",
+                password: "123",
+                badge: badge,
+                uid: badge.replace('EMP-', '')
+              }, { merge: true }));
+            }
+          }
+          await Promise.all(uploadBatch);
+        }
+        showToastNotification("✅ تم رفع التقييمات وربطها بحسابات الموظفين بنجاح!");
+      } catch (err) {
+        alert("⚠️ خطأ أثناء الرفع للسيرفر: " + err.message);
+      }
+    }
+
+
+    function listenToAllEvaluationsLive(tableId) {
+      if (!window.db) return;
+      if (unsubscribeEvaluations) unsubscribeEvaluations();
+
+      unsubscribeEvaluations = window.onSnapshot(window.collection(window.db, "evaluations"), (snapshot) => {
+        const tableBody = document.getElementById(tableId);
+        if (!tableBody) return;
+        tableBody.innerHTML = '';
+
+        if (snapshot.empty) {
+          tableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">لا توجد تقييمات حالية.</td></tr>';
+          return;
+        }
+
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          const displayName = data.name || '-';
+          const displayUsername = data.username || docSnap.id || '-';
+          const displayScore = (data.score !== undefined && data.score !== null && data.score !== '') ? data.score : '-';
+          tableBody.innerHTML += `
+            <tr>
+              <td>${renderUserCellHtml(displayName, getAvatarForUsername(displayUsername) || data.avatar)}</td>
+              <td><code>${displayUsername}</code></td>
+              <td><strong style="color:var(--layer-success);">${displayScore}</strong></td>
+              <td>${data.notes || '-'}</td>
+              <td>${data.time || '-'}</td>
+            </tr>
+          `;
+        });
+      });
+    }
+
+    async function listenToSingleEmployeeLive(employeeName) {
+      if (!window.db || !currentUser) return;
+      if (unsubscribeEmpEval) unsubscribeEmpEval();
+
+      const applyEvalData = (data) => {
+        document.getElementById('emp-score').innerText = (data.score !== undefined && data.score !== null && data.score !== '') ? data.score : '-';
+        document.getElementById('emp-notes').innerText = data.notes || 'لا توجد ملاحظات';
+
+        if (data.score && lastEmpScore !== null && lastEmpScore !== data.score) {
+          showToastNotification(`🔔 تم تحديث تقييمك الشهري الجديد ليصبح: ${data.score}`);
+        }
+        lastEmpScore = data.score;
+
+        document.getElementById('emp-eval-answered').innerText = (data.answered !== undefined && data.answered !== null && data.answered !== '') ? data.answered : '-';
+        document.getElementById('emp-eval-onqueue').innerText = (data.onQueue !== undefined && data.onQueue !== null && data.onQueue !== '') ? data.onQueue : '-';
+        document.getElementById('emp-eval-handling').innerText = (data.handlingTime !== undefined && data.handlingTime !== null && data.handlingTime !== '') ? data.handlingTime : '-';
+        document.getElementById('emp-eval-hold').innerText = (data.holdTime !== undefined && data.holdTime !== null && data.holdTime !== '') ? data.holdTime : '-';
+        document.getElementById('emp-eval-quality').innerText = (data.qualityCalls !== undefined && data.qualityCalls !== null && data.qualityCalls !== '') ? data.qualityCalls : '-';
+        document.getElementById('emp-eval-knowledge').innerText = (data.knowledgeLevel !== undefined && data.knowledgeLevel !== null && data.knowledgeLevel !== '') ? data.knowledgeLevel : '-';
+      };
+
+      try {
+        // 1) المحاولة الأساسية والموثوقة: مطابقة مباشرة عبر اسم المستخدم (username)،
+        //    وهو نفس المعرّف الذي تُحفظ به التقييمات الجديدة المرفوعة من ملف Excel.
+        const directRef = window.doc(window.db, "evaluations", currentUser.username);
+        const directSnap = await window.getDoc(directRef);
+
+        if (directSnap.exists()) {
+          unsubscribeEmpEval = window.onSnapshot(directRef, (snap) => {
+            if (snap.exists()) applyEvalData(snap.data());
+          });
+        } else {
+          // 2) توافقاً مع بيانات قديمة رُفعت سابقاً ولا تحتوي حقل username مطابق:
+          //    نبحث كخطة بديلة بمطابقة الاسم كما كان معمولاً به سابقاً.
+          const q = window.query(window.collection(window.db, "evaluations"), window.where("name", "==", employeeName));
+          unsubscribeEmpEval = window.onSnapshot(q, (qsnap) => {
+            if (!qsnap.empty) applyEvalData(qsnap.docs[0].data());
+          });
+        }
+      } catch (e) { console.log("listenToSingleEmployeeLive:", e); }
+    }
+
+    async function submitReport() {
+      const category = document.getElementById('issue-category').value;
+      const comment = document.getElementById('issue-comment').value.trim();
+
+      if (!category || !comment) return alert("⚠️ يرجى تعبئة جميع الحقول!");
+
+      const reportData = {
+        employeeName: currentUser.name,
+        badge: currentUser.badge || currentUser.uid || 'EMP',
+        phone: currentUser.phone || '+249900000000',
+        avatar: currentUser.avatar || '',
+        category: category,
+        comment: comment,
+        createdAt: new Date().getTime(),
+        time: new Date().toLocaleString('ar-EG')
+      };
+
+      try {
+        if (window.db) {
+          await window.addDoc(window.collection(window.db, "reports"), reportData);
+        }
+        showToastNotification("🚀 تم إرسال البلاغ بنجاح!");
+        document.getElementById('issue-comment').value = '';
+        document.getElementById('issue-category').selectedIndex = 0;
+      } catch (err) {
+        alert("⚠️ خطأ في إرسال البلاغ: " + err.message);
+      }
+    }
+
+    function listenToReportsLive() {
+      if (!window.db) return;
+      if (unsubscribeReports) unsubscribeReports();
+
+      const q = window.query(window.collection(window.db, "reports"), window.orderBy("createdAt", "desc"));
+      unsubscribeReports = window.onSnapshot(q, (snapshot) => {
+        let vpnCount = 0;
+        let techCount = 0;
+        const techTable = document.getElementById('tech-admin-table');
+        if (techTable) techTable.innerHTML = '';
+
+        let latestReportId = null;
+        let latestReportName = null;
+        let unreadReports = 0;
+
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          const docId = docSnap.id;
+          unreadReports++;
+
+          if (!latestReportId) {
+            latestReportId = docId;
+            latestReportName = data.employeeName;
+          }
+
+          if (data.category === 'مشكلة VPN') vpnCount++;
+          if (data.category === 'مشكلة تقنية') techCount++;
+
+          if (techTable && (currentUser.role === 'tech_admin' || currentUser.role === 'admin')) {
+            techTable.innerHTML += `
+              <tr>
+                <td>${renderUserCellHtml(data.employeeName, getAvatarForUsername(data.employeeName) || data.avatar)}</td>
+                <td>${data.phone}</td>
+                <td><code>${data.badge}</code></td>
+                <td><span class="badge badge-vpn">${data.category}</span></td>
+                <td>${data.comment}</td>
+                <td>${data.time}</td>
+                <td>
+                  <button class="btn btn-accent" style="width:auto; padding:4px 8px; font-size:0.7rem;" onclick="deleteReport('${docId}')">حذف</button>
+                </td>
+              </tr>
+            `;
+          }
+        });
+
+        if (document.getElementById('panel-tech-admin') && !document.getElementById('panel-tech-admin').classList.contains('hidden')) {
+          document.getElementById('techadmin-vpn-count').innerText = vpnCount;
+          document.getElementById('techadmin-tech-count').innerText = techCount;
+        }
+
+        if (currentUser.role === 'employee') {
+          if (lastProcessedReportId && latestReportId && lastProcessedReportId !== latestReportId) {
+            showToastNotification(`🔔 تم استلام بلاغك الجديد بنجاح.`);
+          }
+        } else if (currentUser.role === 'tech_admin' || currentUser.role === 'admin') {
+          if (lastProcessedReportId && latestReportId && lastProcessedReportId !== latestReportId) {
+            showToastNotification(`🚨 بلاغ جديد من الموظف: ${latestReportName}`);
+            newIssuesCount++;
+            updateBadgeElement('btn-issues-badge', newIssuesCount);
+          }
+        }
+        if (latestReportId) lastProcessedReportId = latestReportId;
+      });
+    }
+
+    async function deleteReport(id) {
+      if (confirm("هل أنت متأكد من حذف هذا البلاغ؟")) {
+        try {
+          if (window.db) await window.deleteDoc(window.doc(window.db, "reports", id));
+          showToastNotification("🗑️ تم حذف البلاغ بنجاح");
+        } catch(e) { alert("خطأ: " + e.message); }
+      }
+    }
+
+    function listenToAllReportsForGeneralAdmin() {
+      if (!window.db) return;
+      window.onSnapshot(window.query(window.collection(window.db, "reports"), window.orderBy("createdAt", "desc")), (snapshot) => {
+        const tbody = document.getElementById('admin-all-reports-table-body');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        if (snapshot.empty) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">لا توجد بلاغات مسجلة حالياً.</td></tr>';
+          return;
+        }
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          const docId = docSnap.id;
+          tbody.innerHTML += `
+            <tr>
+              <td>${renderUserCellHtml(data.employeeName, getAvatarForUsername(data.employeeName) || data.avatar)}</td>
+              <td><code>${data.badge}</code></td>
+              <td><span class="badge badge-admin">${data.category}</span></td>
+              <td>${data.comment}</td>
+              <td>${data.time}</td>
+              <td>
+                <button class="btn btn-accent" style="width:auto; padding:4px 8px; font-size:0.7rem;" onclick="deleteReport('${docId}')">حذف</button>
+              </td>
+            </tr>
+          `;
+        });
+      });
+    }
+
+    function listenToUsersPresence() {
+      if (!window.db) return;
+      if (unsubscribeUsersPresence) unsubscribeUsersPresence();
+
+      unsubscribeUsersPresence = window.onSnapshot(window.collection(window.db, "system_users"), (snapshot) => {
+        allLoadedUsersCache = {};
+        snapshot.forEach(docSnap => {
+          const d = docSnap.data();
+          if (d.username) {
+            allLoadedUsersCache[d.username] = d;
+          }
+        });
+        if (chatWindowOpen) renderChatUsersList();
+        refreshBreakButtonUI();
+        updateChatHeaderForPartner();
+      });
+    }
+
+    function toggleChatWindow() {
+      chatWindowOpen = !chatWindowOpen;
+      const chatBox = document.getElementById('chatBox');
+      if (chatWindowOpen) {
+        chatBox.classList.remove('hidden');
+        renderChatUsersList();
+      } else {
+        chatBox.classList.add('hidden');
+        if (unsubscribeChat) {
+          unsubscribeChat();
+          unsubscribeChat = null;
+        }
+      }
+    }
+
+    function renderChatUsersList() {
+      const container = document.getElementById('usersListContainer');
+      if (!container) return;
+      container.innerHTML = '';
+
+      let partners = [];
+      const isSuper = (currentUser.role === 'admin' || currentUser.role === 'bs');
+      const myUsernameLower = (currentUser.username || '').toString().trim().toLowerCase();
+
+      Object.keys(allLoadedUsersCache).forEach(uname => {
+        const u = allLoadedUsersCache[uname];
+        const uKeyLower = (uname || '').toString().trim().toLowerCase();
+        const uFieldLower = (u.username || '').toString().trim().toLowerCase();
+        // استبعاد المستخدم الحالي نفسه من القائمة بشكل قاطع، بمقارنة غير حساسة لحالة الأحرف
+        // (تحمي أيضاً من ظهور أي نسخة مكررة بحالة أحرف مختلفة لنفس الحساب)
+        if (uKeyLower === myUsernameLower || uFieldLower === myUsernameLower) return;
+        if (isSuper || u.role === 'admin' || u.role === 'bs' || u.role === 'tech_admin') {
+          partners.push(u);
+        }
+      });
+
+      // إزالة أي تكرار لنفس الشخص في قائمة الدردشة (يحدث أحياناً إذا ارتبط نفس الموظف بأكثر من حساب بنفس الاسم)
+      const seenPartnerNames = new Set();
+      partners = partners.filter(u => {
+        const nameKey = (u.name || '').toString().trim().toLowerCase();
+        if (!nameKey) return true;
+        if (seenPartnerNames.has(nameKey)) return false;
+        seenPartnerNames.add(nameKey);
+        return true;
+      });
+
+      if (partners.length === 0) {
+        container.innerHTML = '<span style="font-size:0.75rem; color:var(--text-sub);">لا يوجد مستخدمون متاحون للمراسلة حالياً.</span>';
+        return;
+      }
+
+      partners.forEach(u => {
+        const isOnline = u.isOnline ? true : false;
+        const cs = u.callStatus || (isOnline ? 'online' : 'offline');
+        const indicatorClass = cs === 'busy' ? 'busy-indicator' : (cs === 'break' ? 'break-indicator' : (isOnline ? 'online-indicator' : 'offline-indicator'));
+        const csLabelHtml = cs === 'busy'
+          ? `<span style="font-size:0.62rem; color:var(--layer-accent-2);">مشغول بمكالمة</span>`
+          : (cs === 'break' ? `<span style="font-size:0.62rem; color:var(--layer-warning-2);">في استراحة</span>` : '');
+        const unreadCount = unreadMessagesMap[u.username] || 0;
+        const badgeHtml = unreadCount > 0 ? `<span class="btn-counter-badge" style="position:relative; top:0; right:0; margin-right:4px;">${unreadCount}</span>` : '';
+
+        const chatAvatarHtml = u.avatar && u.avatar.trim() !== ''
+          ? `<div class="table-avatar-circle" style="width:24px; height:24px;"><img src="${u.avatar}"></div>`
+          : `<div class="table-avatar-circle" style="width:24px; height:24px;"><span>${u.name ? u.name.charAt(0) : 'U'}</span></div>`;
+
+        const item = document.createElement('div');
+        item.className = `chat-user-item ${selectedChatPartner === u.username ? 'active' : ''}`;
+        item.innerHTML = `
+          ${chatAvatarHtml}
+          <div class="${indicatorClass}"></div>
+          <span style="font-weight:700;">${u.name}</span>
+          <span style="font-size:0.65rem; color:var(--text-sub);">(${getRoleLabel(u.role)})</span>
+          ${csLabelHtml}
+          ${badgeHtml}
+        `;
+        item.onclick = () => selectChatPartner(u.username, u);
+        container.appendChild(item);
+      });
+    }
+
+    function selectChatPartner(username, userData) {
+      selectedChatPartner = username;
+      selectedChatPartnerData = userData;
+      if (unreadMessagesMap[username]) {
+        unreadMessagesMap[username] = 0;
+        updateGlobalChatBadge();
+      }
+      renderChatUsersList();
+
+      document.getElementById('chatHeaderTitle').innerText = `محادثة مع: ${userData.name}`;
+      updateChatHeaderForPartner();
+
+      const partnerAvatar = getAvatarForUsername(username) || userData.avatar || '';
+      const headerAvatarEl = document.getElementById('chatHeaderAvatar');
+      if (headerAvatarEl) {
+        headerAvatarEl.innerHTML = partnerAvatar ? `<img src="${partnerAvatar}" style="width:100%; height:100%; object-fit:cover;">` : `<i class="fa-solid fa-comments"></i>`;
+      }
+      const bgAvatarEl = document.getElementById('bgAvatarContainer');
+      if (bgAvatarEl) {
+        bgAvatarEl.innerHTML = partnerAvatar ? `<img src="${partnerAvatar}">` : (userData.name ? userData.name.charAt(0) : 'U');
+      }
+      const bgNameEl = document.getElementById('bgNameContainer');
+      if (bgNameEl) bgNameEl.innerText = userData.name || '';
+
+      const watermark = document.getElementById('chatWatermark');
+      if (watermark) watermark.style.display = 'none';
+
+      listenToMessagesLive();
+    }
+
+    function listenToMessagesLive() {
+      if (!window.db || !selectedChatPartner) return;
+      if (unsubscribeChat) unsubscribeChat();
+
+      const chatId = [currentUser.username, selectedChatPartner].sort().join('_');
+      const q = window.query(window.collection(window.db, "chats", chatId, "messages"), window.orderBy("createdAt", "asc"));
+
+      unsubscribeChat = window.onSnapshot(q, (snapshot) => {
+        const messagesContainer = document.getElementById('chatMessages');
+        let watermark = document.getElementById('chatWatermark');
+        
+        messagesContainer.innerHTML = '';
+        if (watermark) messagesContainer.appendChild(watermark);
+
+        if (snapshot.empty) {
+          if (watermark) watermark.style.display = 'flex';
+          return;
+        }
+        if (watermark) watermark.style.display = 'none';
+
+        snapshot.forEach(docSnap => {
+          const msg = docSnap.data();
+          const isMe = msg.sender === currentUser.username;
+          const bubble = document.createElement('div');
+          bubble.className = `message-bubble ${isMe ? 'msg-sent' : 'msg-received'}`;
+          bubble.innerHTML = `
+            <div>${msg.text}</div>
+            <div style="font-size:0.65rem; opacity:0.7; margin-top:3px; text-align:${isMe ? 'left' : 'right'};">${msg.time || ''}</div>
+          `;
+          messagesContainer.appendChild(bubble);
+        });
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      });
+    }
+
+    async function sendChatMessage() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text || !selectedChatPartner) return;
+
+      const chatId = [currentUser.username, selectedChatPartner].sort().join('_');
+      const msgObj = {
+        sender: currentUser.username,
+        receiver: selectedChatPartner,
+        text: text,
+        createdAt: new Date().getTime(),
+        time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+      };
+
+      try {
+        if (window.db) {
+          await window.addDoc(window.collection(window.db, "chats", chatId, "messages"), msgObj);
+        }
+        input.value = '';
+      } catch(e) { alert("خطأ في إرسال الرسالة: " + e.message); }
+    }
+
+    /* ============================================================
+       📞 نظام الاتصال الصوتي المباشر (WebRTC + Firebase Signaling)
+       المجموعة المستخدمة في Firestore: "calls"
+       كل مستند مكالمة يحتوي على: callerId, callerName, calleeId,
+       calleeName, offer, answer, status, createdAt
+       وتحته مجموعتان فرعيتان: callerCandidates / calleeCandidates
+       ============================================================ */
+
+    // يحدّث نص الحالة وزر الاتصال داخل هيدر نافذة الدردشة بشكل حي
+    function updateChatHeaderForPartner() {
+      if (!selectedChatPartner || !currentUser) return;
+      const partnerStatusText = document.getElementById('chatPartnerStatusText');
+      const callBtn = document.getElementById('voiceCallBtn');
+      if (!partnerStatusText || !callBtn) return;
+
+      const partner = allLoadedUsersCache[selectedChatPartner] || selectedChatPartnerData || {};
+      const cs = partner.callStatus || (partner.isOnline ? 'online' : 'offline');
+      const labels  = { online: 'متصل الآن', break: 'في وضع الاستراحة', busy: 'مشغول بمكالمة الآن', offline: 'غير متصل' };
+      const colors  = { online: 'var(--layer-success-2)', break: 'var(--layer-warning-2)', busy: 'var(--layer-accent-2)', offline: 'var(--text-sub)' };
+
+      partnerStatusText.innerText = labels[cs] || 'غير متصل';
+      partnerStatusText.style.color = colors[cs] || 'var(--text-sub)';
+
+      callBtn.classList.remove('hidden');
+      const meInCall = !!(allLoadedUsersCache[currentUser.username] && allLoadedUsersCache[currentUser.username].inCall);
+      callBtn.disabled = meInCall;
+    }
+
+    // ---- بدء مكالمة صوتية جديدة (الطرف المتصل) ----
+    async function startVoiceCall() {
+      if (!currentUser || !selectedChatPartner || !window.db) return;
+      if (selectedChatPartner.toString().trim().toLowerCase() === (currentUser.username || '').toString().trim().toLowerCase()) {
+        return; // حماية إضافية: لا يمكن الاتصال بالنفس أبداً
+      }
+
+      const me = allLoadedUsersCache[currentUser.username] || {};
+      const partner = allLoadedUsersCache[selectedChatPartner] || {};
+
+      if (me.inCall || currentCallDocId) { showToastNotification("⚠️ أنت بالفعل في مكالمة جارية"); return; }
+      if (!partner.isOnline) { showToastNotification("⚠️ هذا المستخدم غير متصل حالياً"); return; }
+      if (partner.inCall) { showToastNotification(`📞 ${partner.name} مشغول بمكالمة أخرى الآن`); return; }
+
+      const iAmPrivileged = isPrivilegedCallRole(currentUser.role);
+      if (partner.isOnBreak && !iAmPrivileged) {
+        showToastNotification(`☕ ${partner.name} في وضع الاستراحة حالياً، لا يمكن الاتصال به الآن`);
+        return;
+      }
+
+      try {
+        localCallStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      } catch (e) {
+        alert("⚠️ تعذّر الوصول إلى الميكروفون: " + e.message);
+        return;
+      }
+
+      currentCallPartner = { username: selectedChatPartner, name: partner.name || selectedChatPartner };
+      currentCallRole = 'caller';
+
+      peerConnection = new RTCPeerConnection(RTC_CONFIG);
+      localCallStream.getTracks().forEach(t => peerConnection.addTrack(t, localCallStream));
+
+      const remoteStream = new MediaStream();
+      const remoteAudioEl = document.getElementById('remoteAudio');
+      if (remoteAudioEl) remoteAudioEl.srcObject = remoteStream;
+      peerConnection.ontrack = (event) => {
+        event.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
+      };
+
+      const callDocRef = window.doc(window.collection(window.db, "calls"));
+      currentCallDocId = callDocRef.id;
+
+      const callerCandidatesCol = window.collection(window.db, "calls", currentCallDocId, "callerCandidates");
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) window.addDoc(callerCandidatesCol, event.candidate.toJSON());
+      };
+
+      const offerDescription = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offerDescription);
+
+      await window.setDoc(callDocRef, {
+        callerId: currentUser.username,
+        callerName: currentUser.name,
+        calleeId: selectedChatPartner,
+        calleeName: partner.name || selectedChatPartner,
+        offer: { type: offerDescription.type, sdp: offerDescription.sdp },
+        answer: null,
+        status: 'ringing',
+        createdAt: new Date().getTime()
+      });
+
+      await syncCallStatusField(currentUser.username, { inCall: true });
+      showCallOverlay('outgoing', currentCallPartner.name, currentCallPartner.username);
+
+      unsubscribeCallDoc = window.onSnapshot(callDocRef, async (snap) => {
+        const data = snap.data();
+        if (!data) return;
+        if (data.status === 'accepted' && data.answer && peerConnection && !peerConnection.currentRemoteDescription) {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+          showCallOverlay('active', currentCallPartner.name, currentCallPartner.username);
+          if (callTimeoutHandle) { clearTimeout(callTimeoutHandle); callTimeoutHandle = null; }
+        }
+        if (data.status === 'rejected') {
+          showToastNotification(`📵 ${currentCallPartner.name} رفض المكالمة`);
+          endCall(false);
+        }
+        if (data.status === 'ended') {
+          showToastNotification(`📴 انتهت المكالمة`);
+          endCall(false);
+        }
+      });
+
+      const calleeCandidatesCol = window.collection(window.db, "calls", currentCallDocId, "calleeCandidates");
+      unsubscribeRemoteCandidates = window.onSnapshot(calleeCandidatesCol, (snap) => {
+        snap.docChanges().forEach(change => {
+          if (change.type === 'added' && peerConnection) {
+            peerConnection.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          }
+        });
+      });
+
+      callTimeoutHandle = setTimeout(() => {
+        if (currentCallDocId) {
+          showToastNotification("📵 لم يتم الرد على المكالمة");
+          endCall(true);
+        }
+      }, 45000);
+    }
+
+    // ---- الاستماع لأي مكالمات واردة موجهة للمستخدم الحالي ----
+    function listenForIncomingCalls() {
+      if (!window.db || !currentUser) return;
+      if (unsubscribeIncomingCalls) unsubscribeIncomingCalls();
+
+      const q = window.query(
+        window.collection(window.db, "calls"),
+        window.where("calleeId", "==", currentUser.username),
+        window.where("status", "==", "ringing")
+      );
+
+      unsubscribeIncomingCalls = window.onSnapshot(q, (snapshot) => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type !== 'added') return;
+          const data = change.doc.data();
+
+          // تجاهل أي طلبات اتصال قديمة (لتفادي ظهور نوافذ منبثقة عند إعادة تحميل الصفحة)
+          if (!data.createdAt || (new Date().getTime() - data.createdAt) > 50000) return;
+
+          if (currentCallDocId) {
+            // المستخدم بالفعل داخل مكالمة أخرى -> رفض تلقائي بأنه مشغول
+            window.updateDoc(change.doc.ref, { status: 'rejected' }).catch(() => {});
+            return;
+          }
+          handleIncomingCall(change.doc.id, data);
+        });
+      });
+    }
+
+    function handleIncomingCall(callId, data) {
+      currentCallDocId = callId;
+      currentCallRole = 'callee';
+      currentCallPartner = { username: data.callerId, name: data.callerName };
+
+      showCallOverlay('incoming', data.callerName, data.callerId);
+      playAudioNotification();
+
+      const callDocRef = window.doc(window.db, "calls", callId);
+      unsubscribeCallDoc = window.onSnapshot(callDocRef, (snap) => {
+        const d = snap.data();
+        if (!d) return;
+        if (d.status === 'ended') {
+          showToastNotification("📵 ألغى المتصل المكالمة");
+          endCall(false);
+        }
+      });
+    }
+
+    // ---- قبول مكالمة واردة (الطرف المستقبل) ----
+    async function acceptIncomingCall() {
+      if (!currentCallDocId || !currentCallPartner) return;
+
+      try {
+        localCallStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      } catch (e) {
+        alert("⚠️ تعذّر الوصول إلى الميكروفون: " + e.message);
+        rejectIncomingCall();
+        return;
+      }
+
+      const callDocRef = window.doc(window.db, "calls", currentCallDocId);
+      const snap = await window.getDoc(callDocRef);
+      const data = snap.exists() ? snap.data() : null;
+      if (!data || data.status !== 'ringing') {
+        showToastNotification("⚠️ هذه المكالمة لم تعد متاحة");
+        closeCallOverlay();
+        resetCallState();
+        return;
+      }
+
+      peerConnection = new RTCPeerConnection(RTC_CONFIG);
+      localCallStream.getTracks().forEach(t => peerConnection.addTrack(t, localCallStream));
+
+      const remoteStream = new MediaStream();
+      const remoteAudioEl = document.getElementById('remoteAudio');
+      if (remoteAudioEl) remoteAudioEl.srcObject = remoteStream;
+      peerConnection.ontrack = (event) => {
+        event.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
+      };
+
+      const calleeCandidatesCol = window.collection(window.db, "calls", currentCallDocId, "calleeCandidates");
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) window.addDoc(calleeCandidatesCol, event.candidate.toJSON());
+      };
+
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+      const answerDescription = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answerDescription);
+
+      await window.updateDoc(callDocRef, {
+        answer: { type: answerDescription.type, sdp: answerDescription.sdp },
+        status: 'accepted'
+      });
+
+      await syncCallStatusField(currentUser.username, { inCall: true });
+      showCallOverlay('active', currentCallPartner.name, currentCallPartner.username);
+
+      const callerCandidatesCol = window.collection(window.db, "calls", currentCallDocId, "callerCandidates");
+      unsubscribeRemoteCandidates = window.onSnapshot(callerCandidatesCol, (snap2) => {
+        snap2.docChanges().forEach(change => {
+          if (change.type === 'added' && peerConnection) {
+            peerConnection.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          }
+        });
+      });
+    }
+
+    async function rejectIncomingCall() {
+      if (currentCallDocId) {
+        try { await window.updateDoc(window.doc(window.db, "calls", currentCallDocId), { status: 'rejected' }); } catch (e) {}
+      }
+      endCall(false);
+    }
+
+    // ---- إنهاء المكالمة الحالية وتنظيف كل الموارد ----
+    async function endCall(notifyRemote) {
+      if (callTimeoutHandle) { clearTimeout(callTimeoutHandle); callTimeoutHandle = null; }
+
+      if (notifyRemote && currentCallDocId) {
+        try { await window.updateDoc(window.doc(window.db, "calls", currentCallDocId), { status: 'ended' }); } catch (e) {}
+      }
+
+      if (peerConnection) { try { peerConnection.close(); } catch (e) {} peerConnection = null; }
+      if (localCallStream) { localCallStream.getTracks().forEach(t => t.stop()); localCallStream = null; }
+      const remoteAudioEl = document.getElementById('remoteAudio');
+      if (remoteAudioEl) remoteAudioEl.srcObject = null;
+
+      if (unsubscribeCallDoc) { unsubscribeCallDoc(); unsubscribeCallDoc = null; }
+      if (unsubscribeRemoteCandidates) { unsubscribeRemoteCandidates(); unsubscribeRemoteCandidates = null; }
+
+      if (currentUser) await syncCallStatusField(currentUser.username, { inCall: false });
+
+      closeCallOverlay();
+      resetCallState();
+    }
+
+    function resetCallState() {
+      currentCallDocId = null;
+      currentCallRole = null;
+      currentCallPartner = null;
+    }
+
+    // ---- عناصر التحكم بتراكب المكالمة (Call Overlay Modal) ----
+    function showCallOverlay(state, partnerName, partnerUsername) {
+      const overlay = document.getElementById('callOverlay');
+      const nameEl = document.getElementById('callPartnerName');
+      const statusEl = document.getElementById('callStatusText');
+      const avatarEl = document.getElementById('callAvatarCircle');
+      const acceptBtn = document.getElementById('callAcceptBtn');
+      const endBtn = document.getElementById('callEndBtn');
+      if (!overlay) return;
+
+      nameEl.innerText = partnerName || '';
+      const callPartnerAvatar = getAvatarForUsername(partnerUsername || partnerName);
+      avatarEl.innerHTML = callPartnerAvatar ? `<img src="${callPartnerAvatar}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">` : (partnerName || 'U').trim().charAt(0).toUpperCase();
+      overlay.classList.remove('hidden');
+      overlay.classList.toggle('call-state-incoming', state === 'incoming');
+
+      if (state === 'incoming') {
+        startRingtone();
+      } else {
+        stopRingtone();
+      }
+
+      if (state === 'outgoing') {
+        statusEl.innerText = 'جاري الاتصال...';
+        acceptBtn.classList.add('hidden');
+        endBtn.title = 'إلغاء المكالمة';
+        endBtn.onclick = () => endCall(true);
+      } else if (state === 'incoming') {
+        statusEl.innerText = 'مكالمة صوتية واردة...';
+        acceptBtn.classList.remove('hidden');
+        endBtn.title = 'رفض المكالمة';
+        endBtn.onclick = () => rejectIncomingCall();
+      } else if (state === 'active') {
+        statusEl.innerText = 'قيد التحدث الآن';
+        acceptBtn.classList.add('hidden');
+        endBtn.title = 'إنهاء المكالمة';
+        endBtn.onclick = () => endCall(true);
+      }
+    }
+
+    function closeCallOverlay() {
+      stopRingtone();
+      const overlay = document.getElementById('callOverlay');
+      if (overlay) overlay.classList.remove('call-state-incoming');
+      if (overlay) overlay.classList.add('hidden');
+    }
+
+    function listenToChatGlobalNotifications() {
+      if (!window.db || !currentUser) return;
+      const q = window.query(window.collection(window.db, "chats"));
+      window.onSnapshot(q, (snapshot) => {
+        let totalUnread = 0;
+        snapshot.forEach(docSnap => {
+          const chatId = docSnap.id;
+          if (chatId.includes(currentUser.username)) {
+            window.onSnapshot(window.query(window.collection(window.db, "chats", chatId, "messages"), window.orderBy("createdAt", "desc")), (msgSnap) => {
+              if (!msgSnap.empty) {
+                const latestMsg = msgSnap.docs[0].data();
+                if (latestMsg.receiver === currentUser.username && latestMsg.sender !== selectedChatPartner) {
+                  unreadMessagesMap[latestMsg.sender] = (unreadMessagesMap[latestMsg.sender] || 0) + 1;
+                  updateGlobalChatBadge();
+                  if (!chatWindowOpen) {
+                    showToastNotification(`💬 رسالة جديدة من ${allLoadedUsersCache[latestMsg.sender]?.name || latestMsg.sender}`);
+                  }
+                }
+              }
+            });
+          }
+        });
+      });
+    }
+
+    function updateGlobalChatBadge() {
+      let total = 0;
+      Object.keys(unreadMessagesMap).forEach(k => { total += unreadMessagesMap[k]; });
+      updateBadgeElement('totalChatBadge', total);
+      if (chatWindowOpen) renderChatUsersList();
+    }
+
+    function updateBadgeElement(elementId, count) {
+      const badge = document.getElementById(elementId);
+      if (!badge) return;
+      if (count > 0) {
+        badge.innerText = count;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+
+    async function clearChatForBoth() {
+      if (!selectedChatPartner) return alert("⚠️ اختر محادثة لمسحها!");
+      if (confirm("هل أنت متأكد من مسح جميع رسائل هذه المحادثة من الطرفين نهائياً؟")) {
+        try {
+          if (window.db) {
+            const chatId = [currentUser.username, selectedChatPartner].sort().join('_');
+            const snap = await window.getDocs(window.collection(window.db, "chats", chatId, "messages"));
+            const batch = [];
+            snap.forEach(d => batch.push(window.deleteDoc(window.doc(window.db, "chats", chatId, "messages", d.id))));
+            await Promise.all(batch);
+          }
+          showToastNotification("🗑️ تم مسح محتوى المحادثة بالكامل بنجاح");
+          renderWarpChatScreen();
+        } catch(e) { alert("خطأ: " + e.message); }
+      }
+    }
+
+    function renderWarpChatScreen() {
+      const messagesContainer = document.getElementById('chatMessages');
+      let watermark = document.getElementById('chatWatermark');
+      messagesContainer.innerHTML = '';
+      if (watermark) {
+        watermark.style.display = 'flex';
+        messagesContainer.appendChild(watermark);
+      }
+    }
+
+    async function logout() {
+      if (currentCallDocId) { await endCall(true); }
+      if (currentUser) {
+        await setUserOnlineStatus(currentUser.username, false);
+        await syncCallStatusField(currentUser.username, { isOnline: false, isOnBreak: false, inCall: false });
+      }
+      currentUser = null;
+      currentLoginKey = null;
+      if (unsubscribeReports) unsubscribeReports();
+      if (unsubscribeEvaluations) unsubscribeEvaluations();
+      if (unsubscribeEmpEval) unsubscribeEmpEval();
+      if (unsubscribeChat) unsubscribeChat();
+      if (unsubscribeUsersPresence) unsubscribeUsersPresence();
+      if (unsubscribeCustomRequests) unsubscribeCustomRequests();
+      if (unsubscribeBehaviors) unsubscribeBehaviors();
+      if (unsubscribeIncomingCalls) unsubscribeIncomingCalls();
+
+      document.getElementById('dashboard-header').classList.add('hidden');
+      document.getElementById('chatWidgetBtn').classList.add('hidden');
+      document.getElementById('chatBox').classList.add('hidden');
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.add('hidden'));
+      showLoginCard();
+      document.getElementById('password').value = '';
+      showToastNotification("🔒 تم تسجيل الخروج بنجاح");
+    }
+     // 4. دالة رفع ومزامنة كافة المستخدمين دفعة واحدة
+  window.syncAllUsersToFirebase = async function(usersData) {
+    try {
+      for (const [username, info] of Object.entries(usersData)) {
+        await setDoc(userRef, {
+        name: info.name || username,
+        password: info.password || info.pass || "123",
+        role: info.role || "user",
+        badge: info.badge || info.uid || "",
+        phone: info.phone || "",
+        region: info.region || "",
+        avatar: info.avatar || "",
+        status: info.status || "active",
+        lastUpdated: new Date().toISOString()
+      }, { merge: true });
+      }
+      alert("تمت مزامنة ورفع كافة المستخدمين إلى سحابة Firebase بنجاح!");
+      return true;
+    } catch (error) {
+      console.error("خطأ المزامنة:", error);
+      alert("حدث خطأ أثناء المزامنة السحابية: " + error.message);
+      return false;
+    }
+  };
+  
+  </script>
+</body>
+</html>
